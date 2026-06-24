@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DELGADO PARDO HUGO HERNAN</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" crossorigin="anonymous"></script>
+<script>
+// ── SERVICE WORKER: caché automático de tiles offline ──
+if ('serviceWorker' in navigator) {
+  const swCode = `
+const CACHE = 'mapa-tiles-v1';
+const TILE_HOSTS = ['tile.openstreetmap.org'];
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  const isTile = TILE_HOSTS.some(h => url.hostname.includes(h));
+  const isLeaflet = url.hostname.includes('cdnjs.cloudflare.com');
+  if (!isTile && !isLeaflet) return;
+  e.respondWith(
+    caches.open(CACHE).then(cache =>
+      cache.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(res => {
+          if (res.ok) cache.put(e.request, res.clone());
+          return res;
+        }).catch(() => cached || new Response('', {status: 503}));
+      })
+    )
+  );
+});
+`;
+  const blob = new Blob([swCode], {type:'application/javascript'});
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl, {scope:'/'}).catch(()=>{});
+}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f172a;color:#f1f5f9;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#hdr{background:linear-gradient(135deg,#1e3a5f,#0f172a);border-bottom:3px solid #00e5ff;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:8px}
+#hdr h1{font-size:14px;font-weight:700;color:#00e5ff}
+#hdr p{font-size:11px;color:#94a3b8;margin-top:2px}
+.badge{background:rgba(0,229,255,0.15);color:#00e5ff;border:1px solid rgba(0,229,255,0.35);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:300px;background:#1e293b;border-right:1px solid #0f172a;display:flex;flex-direction:column;flex-shrink:0;transition:width 0.28s cubic-bezier(.4,0,.2,1),height 0.28s cubic-bezier(.4,0,.2,1)}
+#sidebar.collapsed{width:0;overflow:hidden;border-right:none}
+#btn-toggle{background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);color:#00e5ff;border-radius:6px;padding:5px 10px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;transition:background 0.2s}
+#btn-toggle:hover{background:rgba(0,229,255,0.25)}
+#btn-expand{display:none;position:absolute;top:12px;left:12px;z-index:1001;background:#00e5ff;color:#000;border:none;border-radius:6px;padding:8px 12px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5);line-height:1}
+#btn-expand.visible{display:block}
+#search-wrap{padding:10px 12px;background:#0f172a;border-bottom:1px solid #1e293b}
+#search{width:100%;background:#1e293b;border:1px solid #334155;color:#f1f5f9;padding:8px 12px;border-radius:6px;font-size:13px;outline:none}
+#search:focus{border-color:#00e5ff}
+#list{flex:1;overflow-y:auto}
+.item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid #0f172a;cursor:pointer;transition:background 0.15s}
+.item:hover,.item.active{background:#1e3a5f}
+.num{width:24px;height:24px;border-radius:50%;background:#00e5ff;color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.item.active .num{background:#ff6b35}
+.cuenta-badge{display:inline-block;background:rgba(255,107,53,0.2);color:#ff9a6c;border:1px solid rgba(255,107,53,0.4);border-radius:4px;font-size:10px;font-weight:700;padding:1px 7px;font-family:monospace}
+.tipo-badge{display:inline-block;border-radius:4px;font-size:10px;font-weight:700;padding:1px 7px;font-family:monospace}
+.tipo-badge.rc{background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.35)}
+.tipo-badge.dc{background:rgba(255,50,50,0.15);color:#ff6b6b;border:1px solid rgba(255,50,50,0.35)}
+.tipo-badge.zv{background:rgba(255,200,0,0.15);color:#fbbf24;border:1px solid rgba(255,200,0,0.35)}
+.item-name{font-size:12px;color:#e2e8f0;line-height:1.4;margin-bottom:3px;font-weight:500}
+.item-coords{font-size:10px;color:#475569;font-family:monospace;margin-bottom:6px}
+.item-btns{display:flex;gap:6px}
+.btn-del{background:rgba(255,59,59,0.15);border:1px solid rgba(255,59,59,0.4);color:#ff6b6b;font-size:10px;font-weight:700;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:monospace;transition:all 0.2s;margin-left:auto}
+.btn-del:hover{background:rgba(255,59,59,0.35);border-color:#ff3b3b}
+.item.done{opacity:0.35;background:#0a1628}
+.item.done .num{background:#334155;color:#64748b}
+.item.done .item-name{text-decoration:line-through;color:#64748b}
+.foto-fachada-panel{margin:6px 0 8px;border-radius:7px;overflow:hidden;border:1px solid rgba(255,107,53,0.45);display:none}
+.foto-fachada-panel.visible{display:block}
+.foto-fachada-header{background:rgba(255,107,53,0.25);color:#ff9a6c;font-size:10px;font-weight:700;padding:4px 8px;font-family:monospace;display:flex;align-items:center;gap:5px}
+.foto-fachada-img{width:100%;display:block;object-fit:contain;background:#000;cursor:pointer}
+.foto-fachada-expand{background:rgba(0,0,0,0.5);color:#ccc;text-align:center;font-size:10px;padding:3px;font-family:monospace;cursor:pointer}
+.foto-fachada-expand:hover{background:rgba(0,0,0,0.7);color:#fff}
+.lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.lightbox.visible{display:flex}
+.lightbox img{max-width:96vw;max-height:82vh;border-radius:8px;border:2px solid #ff6b35}
+.lightbox-close{color:#fff;font-size:30px;cursor:pointer;position:absolute;top:14px;right:20px;font-weight:700;line-height:1}
+.lightbox-label{color:#ff9a6c;font-family:monospace;font-size:11px;text-align:center;padding:0 16px}
+.nav-btn{font-size:10px;padding:4px 8px;border-radius:5px;text-decoration:none;font-weight:600;white-space:nowrap}
+.nav-btn.g{background:#4285F4;color:#fff}
+.nav-btn.w{background:#33CCFF;color:#000}
+#map-wrap{flex:1;position:relative}
+#leafmap{width:100%;height:100%}
+.btn-fitall{position:absolute;top:12px;right:12px;z-index:1000;background:#00e5ff;color:#000;border:none;border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.btn-fitall:hover{background:#33eaff}
+.btn-geo{position:absolute;top:52px;right:12px;z-index:1000;background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.btn-geo:hover{background:#6d28d9}
+@keyframes gpulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.btn-geo.locating{animation:gpulse 1s infinite}
+.geo-bar{padding:7px 12px;background:rgba(124,58,237,0.12);border-bottom:1px solid rgba(124,58,237,0.25);font-size:11px;color:#a78bfa;font-family:monospace;display:none;align-items:center;gap:8px;flex-shrink:0}
+.geo-bar.on{display:flex}
+.geo-dot{width:7px;height:7px;border-radius:50%;background:#7c3aed;animation:gpulse 1.5s infinite;flex-shrink:0}
+.btn-sort{width:calc(100% - 24px);margin:0 12px 6px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:monospace;display:none}
+.btn-sort:hover{background:rgba(124,58,237,0.3)}
+.dbadge{display:inline-block;border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px;font-family:monospace;margin-left:4px}
+.dbadge.cerca{background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.4)}
+.dbadge.medio{background:rgba(255,200,0,0.15);color:#fcd34d;border:1px solid rgba(255,200,0,0.4)}
+.dbadge.lejos{background:rgba(255,80,80,0.15);color:#f87171;border:1px solid rgba(255,80,80,0.4)}
+.geo-pin{width:16px;height:16px;border-radius:50%;background:#7c3aed;border:3px solid #fff;box-shadow:0 0 0 3px rgba(124,58,237,0.4)}
+.leaflet-popup-content-wrapper{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:8px}
+.leaflet-popup-tip{background:#1e293b}
+.popup-title{font-weight:700;font-size:13px;margin-bottom:4px;color:#00e5ff}
+.popup-cuenta{background:rgba(255,107,53,0.2);color:#ff9a6c;border:1px solid rgba(255,107,53,0.4);border-radius:4px;font-size:11px;font-weight:700;padding:2px 8px;margin-bottom:6px;display:inline-block;font-family:monospace}
+.popup-coords{font-size:10px;color:#94a3b8;font-family:monospace;margin-bottom:8px}
+.popup-btns{display:flex;gap:6px}
+.popup-btns a{font-size:11px;padding:5px 10px;border-radius:5px;text-decoration:none;font-weight:700}
+.popup-btns .pg{background:#4285F4;color:#fff}
+.popup-btns .pw{background:#33CCFF;color:#000}
+.custom-marker{width:28px;height:28px;border-radius:50%;background:#00e5ff;color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
+.custom-marker.active{background:#ff6b35}
+.custom-marker.rc{background:#00ff88;color:#003a1a}
+.custom-marker.dc{background:#ff4444;color:#fff}
+.custom-marker.zv{background:#fbbf24;color:#3a2a00}
+.custom-marker.rc.active,.custom-marker.dc.active,.custom-marker.zv.active{background:#ff6b35}
+@media(max-width:640px){
+  #main{flex-direction:column}
+  #sidebar{width:100%;height:45vh;border-right:none;border-bottom:1px solid #0f172a}
+  #sidebar.collapsed{width:100%;height:0;border-bottom:none}
+  #map-wrap{height:55vh}
+  #sidebar.collapsed ~ #map-wrap{height:100%}
+}
+</style>
+</head>
+<body>
+<div id="hdr">
+  <div style="display:flex;align-items:center;gap:10px">
+    <button id="btn-toggle" onclick="toggleSidebar()" title="Mostrar/ocultar lista">☰</button>
+    <div>
+      <h1>📍 DELGADO PARDO HUGO HERNAN</h1>
+      <p>Puntos del día</p>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+    <span class="badge">42 pts</span>
+    <span id="prog-label" style="font-size:10px;color:#00ff88;font-family:monospace;font-weight:700">0/42 listos</span>
+    <span id="cache-lbl" style="font-size:9px;color:#475569;font-family:monospace">⏳ offline...</span>
+    
+  </div>
+</div>
+<div id="main">
+  <div id="sidebar">
+    <div id="search-wrap">
+      <input type="text" id="search" placeholder="🔍 Buscar dirección o cuenta..." oninput="filterList(this.value)">
+    </div>
+    <div class="geo-bar" id="geoBar"><div class="geo-dot"></div><span id="geoTxt">Ubicación activa</span></div>
+    <button class="btn-sort" id="btnSort" onclick="sortByDist()">📶 Ordenar por cercanía</button>
+    <div id="list"><div class="item" id="item0" onclick="selectPoint(0)">
+      <div class="num">1</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61073206</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 17 SUR 12D 19 02</div>
+        <div class="item-coords">4.58244, -74.09764</div>
+        <div class="foto-fachada-panel visible" id="foto0">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1pwwln1PVkR1u0pAEMCm2Y5yTpuzGAvln&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1pwwln1PVkR1u0pAEMCm2Y5yTpuzGAvln&sz=w1000','CL 17 SUR 12D 19 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1pwwln1PVkR1u0pAEMCm2Y5yTpuzGAvln&sz=w1000','CL 17 SUR 12D 19 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58244106,-74.09764281" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58244106,-74.09764281&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,0)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item1" onclick="selectPoint(1)">
+      <div class="num">2</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62480541</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 17 SUR 12F 41 02</div>
+        <div class="item-coords">4.58278, -74.09809</div>
+        <div class="foto-fachada-panel visible" id="foto1">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=17rxpOgEb_HXlc0qd5yR51RhB9S3f3iiw&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=17rxpOgEb_HXlc0qd5yR51RhB9S3f3iiw&sz=w1000','CL 17 SUR 12F 41 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=17rxpOgEb_HXlc0qd5yR51RhB9S3f3iiw&sz=w1000','CL 17 SUR 12F 41 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58277707,-74.09808992" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58277707,-74.09808992&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,1)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item2" onclick="selectPoint(2)">
+      <div class="num">3</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60583235</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 17A SUR 12G 16 00001</div>
+        <div class="item-coords">4.58292, -74.09863</div>
+        <div class="foto-fachada-panel visible" id="foto2">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1dpxtDQKEB6dkz_uopFcN5syn5paQLlXs&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1dpxtDQKEB6dkz_uopFcN5syn5paQLlXs&sz=w1000','CL 17A SUR 12G 16 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1dpxtDQKEB6dkz_uopFcN5syn5paQLlXs&sz=w1000','CL 17A SUR 12G 16 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58292392,-74.09862613" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58292392,-74.09862613&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,2)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item3" onclick="selectPoint(3)">
+      <div class="num">4</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61499990</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18 SUR 12D 19 01 00101</div>
+        <div class="item-coords">4.58165, -74.09845</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58164581,-74.09844714" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58164581,-74.09844714&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,3)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item4" onclick="selectPoint(4)">
+      <div class="num">5</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62290164</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 18 SUR 13 92 00301</div>
+        <div class="item-coords">4.58227, -74.09876</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58226726,-74.09875526" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58226726,-74.09875526&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,4)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item5" onclick="selectPoint(5)">
+      <div class="num">6</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62290263</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 18 SUR 13 92 00303</div>
+        <div class="item-coords">4.58227, -74.09876</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58226726,-74.09875526" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58226726,-74.09875526&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,5)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item6" onclick="selectPoint(6)">
+      <div class="num">7</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60761554</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18A SUR 12D 62 02</div>
+        <div class="item-coords">4.58171, -74.09888</div>
+        <div class="foto-fachada-panel visible" id="foto6">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1iIlzszDW25_9oP3DMtB-2zkJY25xBfYK&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1iIlzszDW25_9oP3DMtB-2zkJY25xBfYK&sz=w1000','CL 18A SUR 12D 62 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1iIlzszDW25_9oP3DMtB-2zkJY25xBfYK&sz=w1000','CL 18A SUR 12D 62 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5817124,-74.09888464" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5817124,-74.09888464&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,6)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item7" onclick="selectPoint(7)">
+      <div class="num">8</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61683426</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19 SUR 12F 23 03</div>
+        <div class="item-coords">4.58108, -74.09955</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58107711,-74.09954655" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58107711,-74.09954655&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,7)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item8" onclick="selectPoint(8)">
+      <div class="num">9</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60582302</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12B 23 01</div>
+        <div class="item-coords">4.57933, -74.09874</div>
+        <div class="foto-fachada-panel visible" id="foto8">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1vbmDwhA-IBgFujEFogUDK795Uuqoh1nn&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1vbmDwhA-IBgFujEFogUDK795Uuqoh1nn&sz=w1000','CL 20 SUR 12B 23 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1vbmDwhA-IBgFujEFogUDK795Uuqoh1nn&sz=w1000','CL 20 SUR 12B 23 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57932932,-74.0987446" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57932932,-74.0987446&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,8)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item9" onclick="selectPoint(9)">
+      <div class="num">10</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63202831</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12B 26 00201</div>
+        <div class="item-coords">4.57960, -74.09846</div>
+        <div class="foto-fachada-panel visible" id="foto9">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1-oK6x2LblCQuCFJtpVkKV2oieAOD8b_C&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1-oK6x2LblCQuCFJtpVkKV2oieAOD8b_C&sz=w1000','CL 20 SUR 12B 26 00201')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1-oK6x2LblCQuCFJtpVkKV2oieAOD8b_C&sz=w1000','CL 20 SUR 12B 26 00201')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57959676,-74.0984559" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57959676,-74.0984559&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,9)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item10" onclick="selectPoint(10)">
+      <div class="num">11</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62891442</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12B 26 00701</div>
+        <div class="item-coords">4.57960, -74.09846</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57959676,-74.0984559" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57959676,-74.0984559&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,10)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item11" onclick="selectPoint(11)">
+      <div class="num">12</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62428058</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12D 42</div>
+        <div class="item-coords">4.58039, -74.09973</div>
+        <div class="foto-fachada-panel visible" id="foto11">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1sxwnotR3KyzQJCybDuJ5_Pa1v1EnnkVQ&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1sxwnotR3KyzQJCybDuJ5_Pa1v1EnnkVQ&sz=w1000','CL 20 SUR 12D 42')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1sxwnotR3KyzQJCybDuJ5_Pa1v1EnnkVQ&sz=w1000','CL 20 SUR 12D 42')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58039462,-74.09973317" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58039462,-74.09973317&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,11)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item12" onclick="selectPoint(12)">
+      <div class="num">13</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60991335</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12F 21 00101</div>
+        <div class="item-coords">4.58026, -74.10015</div>
+        <div class="foto-fachada-panel visible" id="foto12">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1njDkax28icF35__vQg7XXi1X6D_a6DfJ&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1njDkax28icF35__vQg7XXi1X6D_a6DfJ&sz=w1000','CL 20 SUR 12F 21 00101')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1njDkax28icF35__vQg7XXi1X6D_a6DfJ&sz=w1000','CL 20 SUR 12F 21 00101')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58026262,-74.10014519" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58026262,-74.10014519&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,12)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item13" onclick="selectPoint(13)">
+      <div class="num">14</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60581404</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12G 46 03</div>
+        <div class="item-coords">4.58100, -74.10066</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58100335,-74.10065668" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58100335,-74.10065668&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,13)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item14" onclick="selectPoint(14)">
+      <div class="num">15</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60628501</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 22 SUR 11A 24 01</div>
+        <div class="item-coords">4.57788, -74.09702</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57788187,-74.09701542" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57788187,-74.09701542&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,14)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item15" onclick="selectPoint(15)">
+      <div class="num">16</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60586032</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12D 13A SUR 17 01</div>
+        <div class="item-coords">4.58411, -74.09606</div>
+        <div class="foto-fachada-panel visible" id="foto15">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1ctRDFpp6s-jkE8KYoNZ85vKosRPeHB3T&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ctRDFpp6s-jkE8KYoNZ85vKosRPeHB3T&sz=w1000','KR 12D 13A SUR 17 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ctRDFpp6s-jkE8KYoNZ85vKosRPeHB3T&sz=w1000','KR 12D 13A SUR 17 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58411019,-74.09605656" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58411019,-74.09605656&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,15)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item16" onclick="selectPoint(16)">
+      <div class="num">17</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60776761</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12D 14 SUR 99 INT 03</div>
+        <div class="item-coords">4.58302, -74.09694</div>
+        <div class="foto-fachada-panel visible" id="foto16">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1S1AYtzGigorS5gfahY2z23iu2INIzTrt&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1S1AYtzGigorS5gfahY2z23iu2INIzTrt&sz=w1000','KR 12D 14 SUR 99 INT 03')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1S1AYtzGigorS5gfahY2z23iu2INIzTrt&sz=w1000','KR 12D 14 SUR 99 INT 03')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5830215,-74.0969353" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5830215,-74.0969353&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,16)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item17" onclick="selectPoint(17)">
+      <div class="num">18</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60823924</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12F 14 SUR 2 01</div>
+        <div class="item-coords">4.58391, -74.09651</div>
+        <div class="foto-fachada-panel visible" id="foto17">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1FVjfEGHj30cuj_Xg_N0puh9IcpRKefXt&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1FVjfEGHj30cuj_Xg_N0puh9IcpRKefXt&sz=w1000','KR 12F 14 SUR 2 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1FVjfEGHj30cuj_Xg_N0puh9IcpRKefXt&sz=w1000','KR 12F 14 SUR 2 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58391404,-74.09651083" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58391404,-74.09651083&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,17)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item18" onclick="selectPoint(18)">
+      <div class="num">19</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62891815</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12F 15 SUR 33 01 00001</div>
+        <div class="item-coords">4.58364, -74.09714</div>
+        <div class="foto-fachada-panel visible" id="foto18">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=17nQW9LQGOjRnIgKR12Ur_0HNJDFFVpE6&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=17nQW9LQGOjRnIgKR12Ur_0HNJDFFVpE6&sz=w1000','KR 12F 15 SUR 33 01 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=17nQW9LQGOjRnIgKR12Ur_0HNJDFFVpE6&sz=w1000','KR 12F 15 SUR 33 01 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58363565,-74.09714027" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58363565,-74.09714027&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,18)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item19" onclick="selectPoint(19)">
+      <div class="num">20</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63960550</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12F 19 SUR 28 01</div>
+        <div class="item-coords">4.58068, -74.09940</div>
+        <div class="foto-fachada-panel visible" id="foto19">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1QnC0mlpD-NbGOkJ7KoGlVD7WgmaTMFSn&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1QnC0mlpD-NbGOkJ7KoGlVD7WgmaTMFSn&sz=w1000','KR 12F 19 SUR 28 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1QnC0mlpD-NbGOkJ7KoGlVD7WgmaTMFSn&sz=w1000','KR 12F 19 SUR 28 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58067606,-74.09939599" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58067606,-74.09939599&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,19)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item20" onclick="selectPoint(20)">
+      <div class="num">21</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63888880</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">KR 12G 18A SUR 14 00503</div>
+        <div class="item-coords">4.58163, -74.09927</div>
+        <div class="foto-fachada-panel visible" id="foto20">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — suspensión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1UnT2w5sNn2iuQAbAXnDc4kNPBvVYtbJh&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1UnT2w5sNn2iuQAbAXnDc4kNPBvVYtbJh&sz=w1000','KR 12G 18A SUR 14 00503')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1UnT2w5sNn2iuQAbAXnDc4kNPBvVYtbJh&sz=w1000','KR 12G 18A SUR 14 00503')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58163229,-74.09927113" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58163229,-74.09927113&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,20)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item21" onclick="selectPoint(21)">
+      <div class="num">22</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60585357</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12G 19 SUR 18 02</div>
+        <div class="item-coords">4.58110, -74.09975</div>
+        <div class="foto-fachada-panel visible" id="foto21">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1MapqVktiD1HLyqUM6cWZboBcg93QL0RL&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1MapqVktiD1HLyqUM6cWZboBcg93QL0RL&sz=w1000','KR 12G 19 SUR 18 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1MapqVktiD1HLyqUM6cWZboBcg93QL0RL&sz=w1000','KR 12G 19 SUR 18 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58109561,-74.09974628" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58109561,-74.09974628&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,21)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item22" onclick="selectPoint(22)">
+      <div class="num">23</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61920573</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12G 19 SUR 43 03 00002</div>
+        <div class="item-coords">4.58118, -74.10011</div>
+        <div class="foto-fachada-panel visible" id="foto22">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1DQ3laWA1gRyTMQXzXML9yt0qzM3UqLUk&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1DQ3laWA1gRyTMQXzXML9yt0qzM3UqLUk&sz=w1000','KR 12G 19 SUR 43 03 00002')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1DQ3laWA1gRyTMQXzXML9yt0qzM3UqLUk&sz=w1000','KR 12G 19 SUR 43 03 00002')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.581176,-74.10011071" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.581176,-74.10011071&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,22)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item23" onclick="selectPoint(23)">
+      <div class="num">24</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 64068302</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12G 20 SUR 16 00302</div>
+        <div class="item-coords">4.58045, -74.10035</div>
+        <div class="foto-fachada-panel visible" id="foto23">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=17A6nSeCK3LyyZhrOwCGVOmG6fQdYPqEk&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=17A6nSeCK3LyyZhrOwCGVOmG6fQdYPqEk&sz=w1000','KR 12G 20 SUR 16 00302')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=17A6nSeCK3LyyZhrOwCGVOmG6fQdYPqEk&sz=w1000','KR 12G 20 SUR 16 00302')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58044991,-74.1003504" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58044991,-74.1003504&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,23)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item24" onclick="selectPoint(24)">
+      <div class="num">25</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60649045</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">KR 14 19 SUR 6 02</div>
+        <div class="item-coords">4.58204, -74.10052</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58204479,-74.10052303" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58204479,-74.10052303&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,24)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item25" onclick="selectPoint(25)">
+      <div class="num">26</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61498568</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18 SUR 11B 21 00002</div>
+        <div class="item-coords">4.57965, -74.09618</div>
+        <div class="foto-fachada-panel visible" id="foto25">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1P0szQxj0Xu46Gm0JFhC7f_CnHLZUr915&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1P0szQxj0Xu46Gm0JFhC7f_CnHLZUr915&sz=w1000','CL 18 SUR 11B 21 00002')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1P0szQxj0Xu46Gm0JFhC7f_CnHLZUr915&sz=w1000','CL 18 SUR 11B 21 00002')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57965098,-74.0961759" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57965098,-74.0961759&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,25)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item26" onclick="selectPoint(26)">
+      <div class="num">27</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61127761</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18 SUR 11B 29 00002</div>
+        <div class="item-coords">4.57971, -74.09622</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57970999,-74.09622315" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57970999,-74.09622315&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,26)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item27" onclick="selectPoint(27)">
+      <div class="num">28</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61249513</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18 SUR 12B 20 02</div>
+        <div class="item-coords">4.58089, -74.09718</div>
+        <div class="foto-fachada-panel visible" id="foto27">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=13sCN68bryPRhM6p3Ob2jUg477kRkIH8u&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=13sCN68bryPRhM6p3Ob2jUg477kRkIH8u&sz=w1000','CL 18 SUR 12B 20 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=13sCN68bryPRhM6p3Ob2jUg477kRkIH8u&sz=w1000','CL 18 SUR 12B 20 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58089222,-74.09718039" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58089222,-74.09718039&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,27)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item28" onclick="selectPoint(28)">
+      <div class="num">29</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60582241</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18A SUR 10A 76 01</div>
+        <div class="item-coords">4.57834, -74.09510</div>
+        <div class="foto-fachada-panel visible" id="foto28">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=12e_AEaLE37ifqDPO169WuSRKpCAgeqzB&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=12e_AEaLE37ifqDPO169WuSRKpCAgeqzB&sz=w1000','CL 18A SUR 10A 76 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=12e_AEaLE37ifqDPO169WuSRKpCAgeqzB&sz=w1000','CL 18A SUR 10A 76 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57834133,-74.09509772" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57834133,-74.09509772&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,28)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item29" onclick="selectPoint(29)">
+      <div class="num">30</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60869193</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19 SUR 10B 25 01</div>
+        <div class="item-coords">4.57769, -74.09572</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57768736,-74.09571914" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57768736,-74.09571914&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,29)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item30" onclick="selectPoint(30)">
+      <div class="num">31</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60713837</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19 SUR 10B 54 01 00002</div>
+        <div class="item-coords">4.57782, -74.09536</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57782127,-74.09535622" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57782127,-74.09535622&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,30)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item31" onclick="selectPoint(31)">
+      <div class="num">32</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60618827</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19 SUR 11B 46 01</div>
+        <div class="item-coords">4.57913, -74.09689</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57912531,-74.09688889" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57912531,-74.09688889&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,31)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item32" onclick="selectPoint(32)">
+      <div class="num">33</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60664181</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 19 SUR 12A 16 02</div>
+        <div class="item-coords">4.57974, -74.09753</div>
+        <div class="foto-fachada-panel visible" id="foto32">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1Luy7XDTJUu_BtHuOUsBUGUntBqiqDqBE&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1Luy7XDTJUu_BtHuOUsBUGUntBqiqDqBE&sz=w1000','CL 19 SUR 12A 16 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1Luy7XDTJUu_BtHuOUsBUGUntBqiqDqBE&sz=w1000','CL 19 SUR 12A 16 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57974008,-74.09752623" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57974008,-74.09752623&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,32)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item33" onclick="selectPoint(33)">
+      <div class="num">34</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61100577</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19 SUR 12C 16 02</div>
+        <div class="item-coords">4.58047, -74.09833</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58046657,-74.09833254" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58046657,-74.09833254&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,33)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item34" onclick="selectPoint(34)">
+      <div class="num">35</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63789023</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 19A SUR 11B 15 02</div>
+        <div class="item-coords">4.57830, -74.09734</div>
+        <div class="foto-fachada-panel visible" id="foto34">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — suspensión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1yr-ADxlhGsnPOegYl3Opb50Zran8A2f5&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1yr-ADxlhGsnPOegYl3Opb50Zran8A2f5&sz=w1000','CL 19A SUR 11B 15 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1yr-ADxlhGsnPOegYl3Opb50Zran8A2f5&sz=w1000','CL 19A SUR 11B 15 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57829863,-74.09733531" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57829863,-74.09733531&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,34)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item35" onclick="selectPoint(35)">
+      <div class="num">36</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60674167</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 19A SUR 11B 17 01</div>
+        <div class="item-coords">4.57830, -74.09734</div>
+        <div class="foto-fachada-panel visible" id="foto35">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1OziWYp0AxSGig-RBTTLKCAcSHfhJWLmd&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1OziWYp0AxSGig-RBTTLKCAcSHfhJWLmd&sz=w1000','CL 19A SUR 11B 17 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1OziWYp0AxSGig-RBTTLKCAcSHfhJWLmd&sz=w1000','CL 19A SUR 11B 17 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57829863,-74.09733531" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57829863,-74.09733531&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,35)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item36" onclick="selectPoint(36)">
+      <div class="num">37</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60738640</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 10A 18 00403</div>
+        <div class="item-coords">4.57691, -74.09558</div>
+        <div class="foto-fachada-panel visible" id="foto36">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1kAPl7I4Sr8_ZkCkSPUtVhQ0mXnx0Q4HB&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kAPl7I4Sr8_ZkCkSPUtVhQ0mXnx0Q4HB&sz=w1000','CL 20 SUR 10A 18 00403')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kAPl7I4Sr8_ZkCkSPUtVhQ0mXnx0Q4HB&sz=w1000','CL 20 SUR 10A 18 00403')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57690985,-74.09557795" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57690985,-74.09557795&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,36)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item37" onclick="selectPoint(37)">
+      <div class="num">38</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61704745</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12 21</div>
+        <div class="item-coords">4.57884, -74.09803</div>
+        <div class="foto-fachada-panel visible" id="foto37">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1ykeUcTUaP58prnn6Od60t1aqaIdoRKQu&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ykeUcTUaP58prnn6Od60t1aqaIdoRKQu&sz=w1000','CL 20 SUR 12 21')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ykeUcTUaP58prnn6Od60t1aqaIdoRKQu&sz=w1000','CL 20 SUR 12 21')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57884088,-74.09803287" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57884088,-74.09803287&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,37)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item38" onclick="selectPoint(38)">
+      <div class="num">39</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61781253</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 20 SUR 12 21 02 00001</div>
+        <div class="item-coords">4.57884, -74.09803</div>
+        <div class="foto-fachada-panel visible" id="foto38">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1ebNgea2xTJw0OIQ3oRBAYz6BV4tWEn62&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ebNgea2xTJw0OIQ3oRBAYz6BV4tWEn62&sz=w1000','CL 20 SUR 12 21 02 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ebNgea2xTJw0OIQ3oRBAYz6BV4tWEn62&sz=w1000','CL 20 SUR 12 21 02 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57884088,-74.09803287" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57884088,-74.09803287&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,38)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item39" onclick="selectPoint(39)">
+      <div class="num">40</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62232062</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 22 SUR 11A 44</div>
+        <div class="item-coords">4.57797, -74.09720</div>
+        <div class="foto-fachada-panel visible" id="foto39">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=16HwlGoycS4wH2Zyp-QD6OjEWY8xPIFqa&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=16HwlGoycS4wH2Zyp-QD6OjEWY8xPIFqa&sz=w1000','CL 22 SUR 11A 44')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=16HwlGoycS4wH2Zyp-QD6OjEWY8xPIFqa&sz=w1000','CL 22 SUR 11A 44')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57796735,-74.09720098" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57796735,-74.09720098&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,39)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item40" onclick="selectPoint(40)">
+      <div class="num">41</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60704582</span><span class="tipo-badge dc">✂ SUSPENSIÓN</span></div>
+        <div class="item-name">CL 22 SUR 12 46 01</div>
+        <div class="item-coords">4.57879, -74.09837</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5787889,-74.09836557" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5787889,-74.09836557&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,40)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item41" onclick="selectPoint(41)">
+      <div class="num">42</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63804315</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 10 18 SUR 95 01 00001</div>
+        <div class="item-coords">4.57664, -74.09416</div>
+        <div class="foto-fachada-panel visible" id="foto41">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1DOG7pC6w1lDpIS06ZMdVOQPL1bS12b_8&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1DOG7pC6w1lDpIS06ZMdVOQPL1bS12b_8&sz=w1000','KR 10 18 SUR 95 01 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1DOG7pC6w1lDpIS06ZMdVOQPL1bS12b_8&sz=w1000','KR 10 18 SUR 95 01 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57664393,-74.0941627" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57664393,-74.0941627&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,41)">✓ Listo</button>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <div id="map-wrap">
+    <div id="leafmap"></div>
+    <button id="btn-expand" onclick="toggleSidebar()" title="Mostrar lista">☰</button>
+    <button class="btn-fitall" onclick="fitAll()">🗺 Ver todos</button>
+    <button class="btn-geo" id="btnGeo" onclick="toggleGeo()">📍 Mi ubicación</button>
+    <div id="offline-banner" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:1002;background:#1e293b;border:1px solid #f59e0b;border-radius:8px;padding:8px 14px;align-items:center;gap:8px;max-width:90%;box-shadow:0 4px 16px rgba(0,0,0,.5)">
+      <span style="font-size:16px">📶</span>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#f59e0b;font-family:monospace">SIN SEÑAL — modo offline</div>
+        <div style="font-size:10px;color:#94a3b8">La lista y los botones de navegación funcionan con normalidad</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close" onclick="closeLightbox()">✕</span>
+  <img id="lightboxImg" src="" alt="FotoFachada">
+  <div class="lightbox-label" id="lightboxLabel"></div>
+</div>
+
+<script>
+const pts = [{"lat":4.58244106,"lng":-74.09764281,"name":"CL 17 SUR 12D 19 02","cuenta":"61073206","nic":"61073206","fotoUrl":"https://drive.google.com/thumbnail?id=1pwwln1PVkR1u0pAEMCm2Y5yTpuzGAvln&sz=w1000","tipoOp":"RC00"},{"lat":4.58277707,"lng":-74.09808992,"name":"CL 17 SUR 12F 41 02","cuenta":"62480541","nic":"62480541","fotoUrl":"https://drive.google.com/thumbnail?id=17rxpOgEb_HXlc0qd5yR51RhB9S3f3iiw&sz=w1000","tipoOp":"RC00"},{"lat":4.58292392,"lng":-74.09862613,"name":"CL 17A SUR 12G 16 00001","cuenta":"60583235","nic":"60583235","fotoUrl":"https://drive.google.com/thumbnail?id=1dpxtDQKEB6dkz_uopFcN5syn5paQLlXs&sz=w1000","tipoOp":"RC00"},{"lat":4.58164581,"lng":-74.09844714,"name":"CL 18 SUR 12D 19 01 00101","cuenta":"61499990","nic":"61499990","fotoUrl":"","tipoOp":"RC00"},{"lat":4.58226726,"lng":-74.09875526,"name":"CL 18 SUR 13 92 00301","cuenta":"62290164","nic":"62290164","fotoUrl":"","tipoOp":"DC00"},{"lat":4.58226726,"lng":-74.09875526,"name":"CL 18 SUR 13 92 00303","cuenta":"62290263","nic":"62290263","fotoUrl":"","tipoOp":"DC00"},{"lat":4.5817124,"lng":-74.09888464,"name":"CL 18A SUR 12D 62 02","cuenta":"60761554","nic":"60761554","fotoUrl":"https://drive.google.com/thumbnail?id=1iIlzszDW25_9oP3DMtB-2zkJY25xBfYK&sz=w1000","tipoOp":"RC00"},{"lat":4.58107711,"lng":-74.09954655,"name":"CL 19 SUR 12F 23 03","cuenta":"61683426","nic":"61683426","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57932932,"lng":-74.0987446,"name":"CL 20 SUR 12B 23 01","cuenta":"60582302","nic":"60582302","fotoUrl":"https://drive.google.com/thumbnail?id=1vbmDwhA-IBgFujEFogUDK795Uuqoh1nn&sz=w1000","tipoOp":"RC00"},{"lat":4.57959676,"lng":-74.0984559,"name":"CL 20 SUR 12B 26 00201","cuenta":"63202831","nic":"63202831","fotoUrl":"https://drive.google.com/thumbnail?id=1-oK6x2LblCQuCFJtpVkKV2oieAOD8b_C&sz=w1000","tipoOp":"RC00"},{"lat":4.57959676,"lng":-74.0984559,"name":"CL 20 SUR 12B 26 00701","cuenta":"62891442","nic":"62891442","fotoUrl":"","tipoOp":"RC00"},{"lat":4.58039462,"lng":-74.09973317,"name":"CL 20 SUR 12D 42","cuenta":"62428058","nic":"62428058","fotoUrl":"https://drive.google.com/thumbnail?id=1sxwnotR3KyzQJCybDuJ5_Pa1v1EnnkVQ&sz=w1000","tipoOp":"RC00"},{"lat":4.58026262,"lng":-74.10014519,"name":"CL 20 SUR 12F 21 00101","cuenta":"60991335","nic":"60991335","fotoUrl":"https://drive.google.com/thumbnail?id=1njDkax28icF35__vQg7XXi1X6D_a6DfJ&sz=w1000","tipoOp":"RC00"},{"lat":4.58100335,"lng":-74.10065668,"name":"CL 20 SUR 12G 46 03","cuenta":"60581404","nic":"60581404","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57788187,"lng":-74.09701542,"name":"CL 22 SUR 11A 24 01","cuenta":"60628501","nic":"60628501","fotoUrl":"","tipoOp":"DC00"},{"lat":4.58411019,"lng":-74.09605656,"name":"KR 12D 13A SUR 17 01","cuenta":"60586032","nic":"60586032","fotoUrl":"https://drive.google.com/thumbnail?id=1ctRDFpp6s-jkE8KYoNZ85vKosRPeHB3T&sz=w1000","tipoOp":"RC00"},{"lat":4.5830215,"lng":-74.0969353,"name":"KR 12D 14 SUR 99 INT 03","cuenta":"60776761","nic":"60776761","fotoUrl":"https://drive.google.com/thumbnail?id=1S1AYtzGigorS5gfahY2z23iu2INIzTrt&sz=w1000","tipoOp":"RC00"},{"lat":4.58391404,"lng":-74.09651083,"name":"KR 12F 14 SUR 2 01","cuenta":"60823924","nic":"60823924","fotoUrl":"https://drive.google.com/thumbnail?id=1FVjfEGHj30cuj_Xg_N0puh9IcpRKefXt&sz=w1000","tipoOp":"RC00"},{"lat":4.58363565,"lng":-74.09714027,"name":"KR 12F 15 SUR 33 01 00001","cuenta":"62891815","nic":"62891815","fotoUrl":"https://drive.google.com/thumbnail?id=17nQW9LQGOjRnIgKR12Ur_0HNJDFFVpE6&sz=w1000","tipoOp":"RC00"},{"lat":4.58067606,"lng":-74.09939599,"name":"KR 12F 19 SUR 28 01","cuenta":"63960550","nic":"63960550","fotoUrl":"https://drive.google.com/thumbnail?id=1QnC0mlpD-NbGOkJ7KoGlVD7WgmaTMFSn&sz=w1000","tipoOp":"RC00"},{"lat":4.58163229,"lng":-74.09927113,"name":"KR 12G 18A SUR 14 00503","cuenta":"63888880","nic":"63888880","fotoUrl":"https://drive.google.com/thumbnail?id=1UnT2w5sNn2iuQAbAXnDc4kNPBvVYtbJh&sz=w1000","tipoOp":"DC00"},{"lat":4.58109561,"lng":-74.09974628,"name":"KR 12G 19 SUR 18 02","cuenta":"60585357","nic":"60585357","fotoUrl":"https://drive.google.com/thumbnail?id=1MapqVktiD1HLyqUM6cWZboBcg93QL0RL&sz=w1000","tipoOp":"RC00"},{"lat":4.581176,"lng":-74.10011071,"name":"KR 12G 19 SUR 43 03 00002","cuenta":"61920573","nic":"61920573","fotoUrl":"https://drive.google.com/thumbnail?id=1DQ3laWA1gRyTMQXzXML9yt0qzM3UqLUk&sz=w1000","tipoOp":"RC00"},{"lat":4.58044991,"lng":-74.1003504,"name":"KR 12G 20 SUR 16 00302","cuenta":"64068302","nic":"64068302","fotoUrl":"https://drive.google.com/thumbnail?id=17A6nSeCK3LyyZhrOwCGVOmG6fQdYPqEk&sz=w1000","tipoOp":"RC00"},{"lat":4.58204479,"lng":-74.10052303,"name":"KR 14 19 SUR 6 02","cuenta":"60649045","nic":"60649045","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57965098,"lng":-74.0961759,"name":"CL 18 SUR 11B 21 00002","cuenta":"61498568","nic":"61498568","fotoUrl":"https://drive.google.com/thumbnail?id=1P0szQxj0Xu46Gm0JFhC7f_CnHLZUr915&sz=w1000","tipoOp":"RC00"},{"lat":4.57970999,"lng":-74.09622315,"name":"CL 18 SUR 11B 29 00002","cuenta":"61127761","nic":"61127761","fotoUrl":"","tipoOp":"RC00"},{"lat":4.58089222,"lng":-74.09718039,"name":"CL 18 SUR 12B 20 02","cuenta":"61249513","nic":"61249513","fotoUrl":"https://drive.google.com/thumbnail?id=13sCN68bryPRhM6p3Ob2jUg477kRkIH8u&sz=w1000","tipoOp":"RC00"},{"lat":4.57834133,"lng":-74.09509772,"name":"CL 18A SUR 10A 76 01","cuenta":"60582241","nic":"60582241","fotoUrl":"https://drive.google.com/thumbnail?id=12e_AEaLE37ifqDPO169WuSRKpCAgeqzB&sz=w1000","tipoOp":"RC00"},{"lat":4.57768736,"lng":-74.09571914,"name":"CL 19 SUR 10B 25 01","cuenta":"60869193","nic":"60869193","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57782127,"lng":-74.09535622,"name":"CL 19 SUR 10B 54 01 00002","cuenta":"60713837","nic":"60713837","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57912531,"lng":-74.09688889,"name":"CL 19 SUR 11B 46 01","cuenta":"60618827","nic":"60618827","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57974008,"lng":-74.09752623,"name":"CL 19 SUR 12A 16 02","cuenta":"60664181","nic":"60664181","fotoUrl":"https://drive.google.com/thumbnail?id=1Luy7XDTJUu_BtHuOUsBUGUntBqiqDqBE&sz=w1000","tipoOp":"RC00"},{"lat":4.58046657,"lng":-74.09833254,"name":"CL 19 SUR 12C 16 02","cuenta":"61100577","nic":"61100577","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57829863,"lng":-74.09733531,"name":"CL 19A SUR 11B 15 02","cuenta":"63789023","nic":"63789023","fotoUrl":"https://drive.google.com/thumbnail?id=1yr-ADxlhGsnPOegYl3Opb50Zran8A2f5&sz=w1000","tipoOp":"DC00"},{"lat":4.57829863,"lng":-74.09733531,"name":"CL 19A SUR 11B 17 01","cuenta":"60674167","nic":"60674167","fotoUrl":"https://drive.google.com/thumbnail?id=1OziWYp0AxSGig-RBTTLKCAcSHfhJWLmd&sz=w1000","tipoOp":"RC00"},{"lat":4.57690985,"lng":-74.09557795,"name":"CL 20 SUR 10A 18 00403","cuenta":"60738640","nic":"60738640","fotoUrl":"https://drive.google.com/thumbnail?id=1kAPl7I4Sr8_ZkCkSPUtVhQ0mXnx0Q4HB&sz=w1000","tipoOp":"RC00"},{"lat":4.57884088,"lng":-74.09803287,"name":"CL 20 SUR 12 21","cuenta":"61704745","nic":"61704745","fotoUrl":"https://drive.google.com/thumbnail?id=1ykeUcTUaP58prnn6Od60t1aqaIdoRKQu&sz=w1000","tipoOp":"RC00"},{"lat":4.57884088,"lng":-74.09803287,"name":"CL 20 SUR 12 21 02 00001","cuenta":"61781253","nic":"61781253","fotoUrl":"https://drive.google.com/thumbnail?id=1ebNgea2xTJw0OIQ3oRBAYz6BV4tWEn62&sz=w1000","tipoOp":"RC00"},{"lat":4.57796735,"lng":-74.09720098,"name":"CL 22 SUR 11A 44","cuenta":"62232062","nic":"62232062","fotoUrl":"https://drive.google.com/thumbnail?id=16HwlGoycS4wH2Zyp-QD6OjEWY8xPIFqa&sz=w1000","tipoOp":"RC00"},{"lat":4.5787889,"lng":-74.09836557,"name":"CL 22 SUR 12 46 01","cuenta":"60704582","nic":"60704582","fotoUrl":"","tipoOp":"DC00"},{"lat":4.57664393,"lng":-74.0941627,"name":"KR 10 18 SUR 95 01 00001","cuenta":"63804315","nic":"63804315","fotoUrl":"https://drive.google.com/thumbnail?id=1DOG7pC6w1lDpIS06ZMdVOQPL1bS12b_8&sz=w1000","tipoOp":"RC00"}];
+let activeIdx = -1;
+let markers = [];
+
+// ─── TOGGLE SIDEBAR ─────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const expandBtn = document.getElementById('btn-expand');
+  const collapsed = sb.classList.toggle('collapsed');
+  expandBtn.classList.toggle('visible', collapsed);
+  setTimeout(() => map.invalidateSize(), 300);
+}
+
+// ─── PERSISTENCIA localStorage ──────────────────
+const STORAGE_KEY = 'progreso_' + location.pathname.split('/').pop().replace(/[^a-zA-Z0-9]/g,'_');
+
+function cargarProgreso() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch(e) { return []; }
+}
+function guardarProgreso(listos) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(listos)); } catch(e) {}
+}
+function actualizarContador() {
+  const listos = cargarProgreso();
+  const total = pts.length;
+  const hechos = listos.length;
+  const el = document.getElementById('prog-label');
+  if (el) el.textContent = hechos + '/' + total + ' listos';
+}
+// ────────────────────────────────────────────────
+
+const map = L.map('leafmap', {zoomControl:true});
+
+// ── TILES con fallback offline ──
+const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 19,
+  errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+}).addTo(map);
+
+// Banner offline
+const offlineBanner = document.getElementById('offline-banner');
+let offlineTiles = 0, totalTiles = 0;
+tileLayer.on('tileloadstart', () => totalTiles++);
+tileLayer.on('tileload', () => {
+  if (offlineBanner) offlineBanner.style.display = 'none';
+  const lbl = document.getElementById('cache-lbl');
+  if (lbl) { lbl.textContent = '✅ offline listo'; lbl.style.color = '#00ff88'; }
+});
+tileLayer.on('tileerror', () => {
+  offlineTiles++;
+  if (offlineBanner && offlineTiles > 2) {
+    offlineBanner.style.display = 'flex';
+  }
+});
+
+// Detector de conexión
+window.addEventListener('online', () => { if (offlineBanner) offlineBanner.style.display = 'none'; tileLayer.redraw(); });
+window.addEventListener('offline', () => { if (offlineBanner) offlineBanner.style.display = 'flex'; });
+
+function makeIcon(i, isActive) {
+  const tipo = pts[i].tipoOp || '';
+  const cls = tipo === 'RC00' ? 'rc' : tipo === 'DC00' ? 'dc' : tipo === 'ZVCL' ? 'zv' : '';
+  return L.divIcon({
+    className:'',
+    html:`<div class="custom-marker${cls?' '+cls:''}${isActive?' active':''}">${i+1}</div>`,
+    iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-14]
+  });
+}
+
+pts.forEach((p,i) => {
+  const label = p.name || 'Punto '+(i+1);
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+  const waze = `https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes`;
+  const cuentaHtml = p.cuenta ? `<div class="popup-cuenta">📋 ${p.cuenta}</div>` : '';
+  let tipoHtml = '';
+  if (p.tipoOp === 'RC00') tipoHtml = `<div style="display:inline-block;background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">🔌 RECONEXIÓN</div>`;
+  else if (p.tipoOp === 'DC00') tipoHtml = `<div style="display:inline-block;background:rgba(255,50,50,0.15);color:#ff6b6b;border:1px solid rgba(255,50,50,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">✂ SUSPENSIÓN</div>`;
+  else if (p.tipoOp === 'ZVCL') tipoHtml = `<div style="display:inline-block;background:rgba(255,200,0,0.15);color:#fbbf24;border:1px solid rgba(255,200,0,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">⚠ ZVCL</div>`;
+  let fotoPopupHtml = '';
+  if (p.fotoUrl && p.tipoOp === 'RC00') {
+    fotoPopupHtml = `<div style="margin:6px 0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,107,53,0.4)">
+      <div style="background:rgba(255,107,53,0.2);color:#ff9a6c;font-size:10px;font-weight:700;padding:3px 8px;font-family:monospace">📸 FOTO FACHADA</div>
+      <img src="${p.fotoUrl}" style="width:100%;object-fit:contain;background:#000;display:block;cursor:pointer" onclick="openLightbox('${p.fotoUrl}','${label.replace(/'/g,'')}')" alt="FotoFachada">
+      <div style="background:rgba(0,0,0,0.5);color:#ccc;text-align:center;font-size:10px;padding:3px;font-family:monospace;cursor:pointer" onclick="openLightbox('${p.fotoUrl}','${label.replace(/'/g,'')}')">🔍 Ver completa</div>
+    </div>`;
+  }
+  const popup = `<div class="popup-title">${i+1}. ${label}</div>${tipoHtml}${cuentaHtml}<div class="popup-coords">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>${fotoPopupHtml}<div class="popup-btns"><a href="${gmaps}" target="_blank" class="pg">🗺 Google Maps</a><a href="${waze}" target="_blank" class="pw">🚗 Waze</a></div>`;
+  const marker = L.marker([p.lat,p.lng],{icon:makeIcon(i,false)}).addTo(map).bindPopup(popup,{maxWidth:260});
+  marker.on('click',()=>selectPoint(i));
+  markers.push(marker);
+});
+
+// ─── RESTAURAR PROGRESO AL CARGAR ──────────────
+(function restaurarProgreso() {
+  const listos = cargarProgreso();
+  if (!listos.length) { fitAll(); return; }
+  const sidebar = document.getElementById('list');
+  listos.forEach(i => {
+    const el = document.getElementById('item' + i);
+    if (!el) return;
+    el.classList.add('done');
+    if (markers[i]) map.removeLayer(markers[i]);
+    if (sidebar) sidebar.appendChild(el);
+  });
+  actualizarContador();
+  fitAll();
+})();
+
+function fitAll() {
+  const visibles = markers.filter(m => map.hasLayer(m));
+  const grupo = visibles.length ? visibles : markers;
+  if (!grupo.length) return;
+  map.fitBounds(L.featureGroup(grupo).getBounds().pad(0.12));
+}
+
+function eliminarItem(e, i) {
+  e.stopPropagation();
+  const el = document.getElementById('item' + i);
+  if (!el) return;
+  let listos = cargarProgreso();
+  if (el.classList.contains('done')) {
+    // Desmarcar: restaurar punto en el mapa
+    el.classList.remove('done');
+    if (markers[i]) {
+      markers[i].addTo(map);
+      markers[i].setIcon(makeIcon(i, false));
+    }
+    listos = listos.filter(x => x !== i);
+  } else {
+    // Marcar como listo: quitar punto del mapa
+    el.classList.add('done');
+    if (markers[i]) map.removeLayer(markers[i]);
+    // Mover al final de la lista
+    const sidebar = el.parentNode;
+    sidebar.appendChild(el);
+    if (!listos.includes(i)) listos.push(i);
+  }
+  guardarProgreso(listos);
+  actualizarContador();
+}
+
+function selectPoint(i) {
+  if(activeIdx>=0){
+    markers[activeIdx].setIcon(makeIcon(activeIdx,false));
+    const prev=document.getElementById('item'+activeIdx);
+    if(prev) prev.classList.remove('active');
+  }
+  activeIdx=i;
+  markers[i].setIcon(makeIcon(i,true));
+  markers[i].openPopup();
+  map.setView([pts[i].lat,pts[i].lng],17);
+  const el=document.getElementById('item'+i);
+  if(el){el.classList.add('active');el.scrollIntoView({behavior:'smooth',block:'nearest'});}
+}
+
+function filterList(q) {
+  q=q.toLowerCase();
+  document.querySelectorAll('.item').forEach(el=>{
+    el.style.display=el.innerText.toLowerCase().includes(q)?'':'none';
+  });
+}
+function openLightbox(url, label) {
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightboxLabel').textContent = label;
+  document.getElementById('lightbox').classList.add('visible');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('visible');
+  document.getElementById('lightboxImg').src = '';
+}
+
+// ── GEOLOCALIZACIÓN ──────────────────────────────
+let geoOn=false, watchId=null, pinMarker=null, pinCircle=null;
+
+function hav(a,b,c,d){
+  const R=6371,dL=(c-a)*Math.PI/180,dG=(d-b)*Math.PI/180;
+  const x=Math.sin(dL/2)**2+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dG/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+function fmtD(k){return k<1?Math.round(k*1000)+' m':k.toFixed(1)+' km';}
+function cls(k){return k<0.3?'cerca':k<1.5?'medio':'lejos';}
+
+function updateDists(lat,lng){
+  pts.forEach((p,i)=>{
+    p._d=hav(lat,lng,p.lat,p.lng);
+    const el=document.getElementById('item'+i);
+    if(!el)return;
+    let b=el.querySelector('.dbadge');
+    if(!b){
+      b=document.createElement('span');
+      b.className='dbadge';
+      const c=el.querySelector('.item-coords');
+      if(c)c.after(b);
+    }
+    b.className='dbadge '+cls(p._d);
+    b.textContent='📏 '+fmtD(p._d);
+  });
+  document.getElementById('btnSort').style.display='block';
+  const near=pts.reduce((a,p,i)=>p._d<(a._d??9999)?{...p,i}:a,{});
+  document.getElementById('geoTxt').textContent='Más cercano: #'+(near.i+1)+' · '+fmtD(near._d);
+}
+
+function sortByDist(){
+  const list=document.getElementById('list');
+  const pend=[...list.querySelectorAll('.item:not(.done)')];
+  const done=[...list.querySelectorAll('.item.done')];
+  pend.sort((a,b)=>(pts[+a.id.replace('item','')]._d||999)-(pts[+b.id.replace('item','')]._d||999));
+  list.innerHTML='';
+  [...pend,...done].forEach(e=>list.appendChild(e));
+  list.scrollTop=0;
+}
+
+function toggleGeo(){
+  const btn=document.getElementById('btnGeo');
+  if(geoOn){
+    navigator.geolocation.clearWatch(watchId);
+    if(pinMarker){map.removeLayer(pinMarker);pinMarker=null;}
+    if(pinCircle){map.removeLayer(pinCircle);pinCircle=null;}
+    geoOn=false; watchId=null;
+    btn.textContent='📍 Mi ubicación';
+    btn.classList.remove('locating');
+    btn.style.background='#7c3aed';
+    document.getElementById('geoBar').classList.remove('on');
+    document.getElementById('btnSort').style.display='none';
+    document.querySelectorAll('.dbadge').forEach(b=>b.remove());
+    return;
+  }
+  if(!navigator.geolocation){alert('Tu navegador no soporta geolocalización.');return;}
+  btn.textContent='⏳ Buscando...';
+  btn.classList.add('locating');
+  watchId=navigator.geolocation.watchPosition(
+    pos=>{
+      const{latitude:lat,longitude:lng,accuracy:acc}=pos.coords;
+      geoOn=true;
+      btn.textContent='🟢 Activo — toca para apagar';
+      btn.classList.remove('locating');
+      btn.style.background='#059669';
+      document.getElementById('geoBar').classList.add('on');
+      const ico=L.divIcon({className:'',html:'<div class="geo-pin"></div>',iconSize:[16,16],iconAnchor:[8,8]});
+      if(pinMarker){pinMarker.setLatLng([lat,lng]);pinCircle.setLatLng([lat,lng]).setRadius(acc);}
+      else{
+        pinMarker=L.marker([lat,lng],{icon:ico,zIndexOffset:2000}).addTo(map)
+          .bindPopup(`<b style="color:#a78bfa">📍 Tu ubicación</b><br><span style="font-size:10px;color:#94a3b8">±${Math.round(acc)}m de precisión</span>`);
+        pinCircle=L.circle([lat,lng],{radius:acc,color:'#7c3aed',fillColor:'#7c3aed',fillOpacity:0.07,weight:1}).addTo(map);
+      }
+      updateDists(lat,lng);
+    },
+    err=>{
+      btn.textContent='📍 Mi ubicación';
+      btn.classList.remove('locating');
+      btn.style.background='#7c3aed';
+      geoOn=false;
+      const m={1:'Permiso denegado.',2:'No se pudo obtener ubicación.',3:'Tiempo agotado.'};
+      alert(m[err.code]||'Error de geolocalización.');
+    },
+    {enableHighAccuracy:true,maximumAge:8000,timeout:15000}
+  );
+}
+// ── CAPA KML DE REFERENCIA ───────────────────────
+// Sin capa KML configurada
+</script>
+</body>
+</html>
