@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MENDEZ TORRES JOHAN MANOLO</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js" crossorigin="anonymous"></script>
+<script>
+// ── SERVICE WORKER: caché automático de tiles offline ──
+if ('serviceWorker' in navigator) {
+  const swCode = `
+const CACHE = 'mapa-tiles-v1';
+const TILE_HOSTS = ['tile.openstreetmap.org'];
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  const isTile = TILE_HOSTS.some(h => url.hostname.includes(h));
+  const isLeaflet = url.hostname.includes('cdnjs.cloudflare.com');
+  if (!isTile && !isLeaflet) return;
+  e.respondWith(
+    caches.open(CACHE).then(cache =>
+      cache.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(res => {
+          if (res.ok) cache.put(e.request, res.clone());
+          return res;
+        }).catch(() => cached || new Response('', {status: 503}));
+      })
+    )
+  );
+});
+`;
+  const blob = new Blob([swCode], {type:'application/javascript'});
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl, {scope:'/'}).catch(()=>{});
+}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f172a;color:#f1f5f9;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#hdr{background:linear-gradient(135deg,#1e3a5f,#0f172a);border-bottom:3px solid #00e5ff;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:8px}
+#hdr h1{font-size:14px;font-weight:700;color:#00e5ff}
+#hdr p{font-size:11px;color:#94a3b8;margin-top:2px}
+.badge{background:rgba(0,229,255,0.15);color:#00e5ff;border:1px solid rgba(0,229,255,0.35);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:300px;background:#1e293b;border-right:1px solid #0f172a;display:flex;flex-direction:column;flex-shrink:0;transition:width 0.28s cubic-bezier(.4,0,.2,1),height 0.28s cubic-bezier(.4,0,.2,1)}
+#sidebar.collapsed{width:0;overflow:hidden;border-right:none}
+#btn-toggle{background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);color:#00e5ff;border-radius:6px;padding:5px 10px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;transition:background 0.2s}
+#btn-toggle:hover{background:rgba(0,229,255,0.25)}
+#btn-expand{display:none;position:absolute;top:12px;left:12px;z-index:1001;background:#00e5ff;color:#000;border:none;border-radius:6px;padding:8px 12px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5);line-height:1}
+#btn-expand.visible{display:block}
+#search-wrap{padding:10px 12px;background:#0f172a;border-bottom:1px solid #1e293b}
+#search{width:100%;background:#1e293b;border:1px solid #334155;color:#f1f5f9;padding:8px 12px;border-radius:6px;font-size:13px;outline:none}
+#search:focus{border-color:#00e5ff}
+#list{flex:1;overflow-y:auto}
+.item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid #0f172a;cursor:pointer;transition:background 0.15s}
+.item:hover,.item.active{background:#1e3a5f}
+.num{width:24px;height:24px;border-radius:50%;background:#00e5ff;color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.item.active .num{background:#ff6b35}
+.cuenta-badge{display:inline-block;background:rgba(255,107,53,0.2);color:#ff9a6c;border:1px solid rgba(255,107,53,0.4);border-radius:4px;font-size:10px;font-weight:700;padding:1px 7px;font-family:monospace}
+.tipo-badge{display:inline-block;border-radius:4px;font-size:10px;font-weight:700;padding:1px 7px;font-family:monospace}
+.tipo-badge.rc{background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.35)}
+.tipo-badge.dc{background:rgba(255,50,50,0.15);color:#ff6b6b;border:1px solid rgba(255,50,50,0.35)}
+.tipo-badge.zv{background:rgba(255,200,0,0.15);color:#fbbf24;border:1px solid rgba(255,200,0,0.35)}
+.item-name{font-size:12px;color:#e2e8f0;line-height:1.4;margin-bottom:3px;font-weight:500}
+.item-coords{font-size:10px;color:#475569;font-family:monospace;margin-bottom:6px}
+.item-btns{display:flex;gap:6px}
+.btn-del{background:rgba(255,59,59,0.15);border:1px solid rgba(255,59,59,0.4);color:#ff6b6b;font-size:10px;font-weight:700;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:monospace;transition:all 0.2s;margin-left:auto}
+.btn-del:hover{background:rgba(255,59,59,0.35);border-color:#ff3b3b}
+.item.done{opacity:0.35;background:#0a1628}
+.item.done .num{background:#334155;color:#64748b}
+.item.done .item-name{text-decoration:line-through;color:#64748b}
+.foto-fachada-panel{margin:6px 0 8px;border-radius:7px;overflow:hidden;border:1px solid rgba(255,107,53,0.45);display:none}
+.foto-fachada-panel.visible{display:block}
+.foto-fachada-header{background:rgba(255,107,53,0.25);color:#ff9a6c;font-size:10px;font-weight:700;padding:4px 8px;font-family:monospace;display:flex;align-items:center;gap:5px}
+.foto-fachada-img{width:100%;display:block;object-fit:contain;background:#000;cursor:pointer}
+.foto-fachada-expand{background:rgba(0,0,0,0.5);color:#ccc;text-align:center;font-size:10px;padding:3px;font-family:monospace;cursor:pointer}
+.foto-fachada-expand:hover{background:rgba(0,0,0,0.7);color:#fff}
+.lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.lightbox.visible{display:flex}
+.lightbox img{max-width:96vw;max-height:82vh;border-radius:8px;border:2px solid #ff6b35}
+.lightbox-close{color:#fff;font-size:30px;cursor:pointer;position:absolute;top:14px;right:20px;font-weight:700;line-height:1}
+.lightbox-label{color:#ff9a6c;font-family:monospace;font-size:11px;text-align:center;padding:0 16px}
+.nav-btn{font-size:10px;padding:4px 8px;border-radius:5px;text-decoration:none;font-weight:600;white-space:nowrap}
+.nav-btn.g{background:#4285F4;color:#fff}
+.nav-btn.w{background:#33CCFF;color:#000}
+#map-wrap{flex:1;position:relative}
+#leafmap{width:100%;height:100%}
+.btn-fitall{position:absolute;top:12px;right:12px;z-index:1000;background:#00e5ff;color:#000;border:none;border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.btn-fitall:hover{background:#33eaff}
+.btn-geo{position:absolute;top:52px;right:12px;z-index:1000;background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.btn-geo:hover{background:#6d28d9}
+@keyframes gpulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.btn-geo.locating{animation:gpulse 1s infinite}
+.geo-bar{padding:7px 12px;background:rgba(124,58,237,0.12);border-bottom:1px solid rgba(124,58,237,0.25);font-size:11px;color:#a78bfa;font-family:monospace;display:none;align-items:center;gap:8px;flex-shrink:0}
+.geo-bar.on{display:flex}
+.geo-dot{width:7px;height:7px;border-radius:50%;background:#7c3aed;animation:gpulse 1.5s infinite;flex-shrink:0}
+.btn-sort{width:calc(100% - 24px);margin:0 12px 6px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:monospace;display:none}
+.btn-sort:hover{background:rgba(124,58,237,0.3)}
+.dbadge{display:inline-block;border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px;font-family:monospace;margin-left:4px}
+.dbadge.cerca{background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.4)}
+.dbadge.medio{background:rgba(255,200,0,0.15);color:#fcd34d;border:1px solid rgba(255,200,0,0.4)}
+.dbadge.lejos{background:rgba(255,80,80,0.15);color:#f87171;border:1px solid rgba(255,80,80,0.4)}
+.geo-pin{width:16px;height:16px;border-radius:50%;background:#7c3aed;border:3px solid #fff;box-shadow:0 0 0 3px rgba(124,58,237,0.4)}
+.leaflet-popup-content-wrapper{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:8px}
+.leaflet-popup-tip{background:#1e293b}
+.popup-title{font-weight:700;font-size:13px;margin-bottom:4px;color:#00e5ff}
+.popup-cuenta{background:rgba(255,107,53,0.2);color:#ff9a6c;border:1px solid rgba(255,107,53,0.4);border-radius:4px;font-size:11px;font-weight:700;padding:2px 8px;margin-bottom:6px;display:inline-block;font-family:monospace}
+.popup-coords{font-size:10px;color:#94a3b8;font-family:monospace;margin-bottom:8px}
+.popup-btns{display:flex;gap:6px}
+.popup-btns a{font-size:11px;padding:5px 10px;border-radius:5px;text-decoration:none;font-weight:700}
+.popup-btns .pg{background:#4285F4;color:#fff}
+.popup-btns .pw{background:#33CCFF;color:#000}
+.custom-marker{width:28px;height:28px;border-radius:50%;background:#00e5ff;color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer}
+.custom-marker.active{background:#ff6b35}
+.custom-marker.rc{background:#00ff88;color:#003a1a}
+.custom-marker.dc{background:#ff4444;color:#fff}
+.custom-marker.zv{background:#fbbf24;color:#3a2a00}
+.custom-marker.rc.active,.custom-marker.dc.active,.custom-marker.zv.active{background:#ff6b35}
+@media(max-width:640px){
+  #main{flex-direction:column}
+  #sidebar{width:100%;height:45vh;border-right:none;border-bottom:1px solid #0f172a}
+  #sidebar.collapsed{width:100%;height:0;border-bottom:none}
+  #map-wrap{height:55vh}
+  #sidebar.collapsed ~ #map-wrap{height:100%}
+}
+</style>
+</head>
+<body>
+<div id="hdr">
+  <div style="display:flex;align-items:center;gap:10px">
+    <button id="btn-toggle" onclick="toggleSidebar()" title="Mostrar/ocultar lista">☰</button>
+    <div>
+      <h1>📍 MENDEZ TORRES JOHAN MANOLO</h1>
+      <p>Puntos del día</p>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+    <span class="badge">35 pts</span>
+    <span id="prog-label" style="font-size:10px;color:#00ff88;font-family:monospace;font-weight:700">0/35 listos</span>
+    <span id="cache-lbl" style="font-size:9px;color:#475569;font-family:monospace">⏳ offline...</span>
+    
+  </div>
+</div>
+<div id="main">
+  <div id="sidebar">
+    <div id="search-wrap">
+      <input type="text" id="search" placeholder="🔍 Buscar dirección o cuenta..." oninput="filterList(this.value)">
+    </div>
+    <div class="geo-bar" id="geoBar"><div class="geo-dot"></div><span id="geoTxt">Ubicación activa</span></div>
+    <button class="btn-sort" id="btnSort" onclick="sortByDist()">📶 Ordenar por cercanía</button>
+    <div id="list"><div class="item" id="item0" onclick="selectPoint(0)">
+      <div class="num">1</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63500125</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 11 1B 12 01</div>
+        <div class="item-coords">4.53893, -74.28167</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.53892573,-74.28166686" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.53892573,-74.28166686&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,0)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item1" onclick="selectPoint(1)">
+      <div class="num">2</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62317329</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 16 SUR 15J 73 257</div>
+        <div class="item-coords">4.57678, -74.23832</div>
+        <div class="foto-fachada-panel visible" id="foto1">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1UBx7wbgYzs3hCKDKXNRgNyOZECJ3m6SM&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1UBx7wbgYzs3hCKDKXNRgNyOZECJ3m6SM&sz=w1000','CL 16 SUR 15J 73 257')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1UBx7wbgYzs3hCKDKXNRgNyOZECJ3m6SM&sz=w1000','CL 16 SUR 15J 73 257')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57677782,-74.23831886" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57677782,-74.23831886&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,1)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item2" onclick="selectPoint(2)">
+      <div class="num">3</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62579255</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 15C 19 SUR 17 02</div>
+        <div class="item-coords">4.57534, -74.23855</div>
+        <div class="foto-fachada-panel visible" id="foto2">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=13khciic2O7p-ttLLMcF8rs4D_vL1HyNA&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=13khciic2O7p-ttLLMcF8rs4D_vL1HyNA&sz=w1000','KR 15C 19 SUR 17 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=13khciic2O7p-ttLLMcF8rs4D_vL1HyNA&sz=w1000','KR 15C 19 SUR 17 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57533976,-74.2385531" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57533976,-74.2385531&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,2)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item3" onclick="selectPoint(3)">
+      <div class="num">4</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63099492</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 15H 28 SUR 40 00001</div>
+        <div class="item-coords">4.57596, -74.24213</div>
+        
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57595676,-74.242133" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57595676,-74.242133&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,3)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item4" onclick="selectPoint(4)">
+      <div class="num">5</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61706766</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 1C 26 13</div>
+        <div class="item-coords">4.57554, -74.24686</div>
+        <div class="foto-fachada-panel visible" id="foto4">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1o1C261_0K36uGFJcq-KBHVfF0GIXfp6J&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1o1C261_0K36uGFJcq-KBHVfF0GIXfp6J&sz=w1000','CL 1C 26 13')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1o1C261_0K36uGFJcq-KBHVfF0GIXfp6J&sz=w1000','CL 1C 26 13')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57553791,-74.24685755" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57553791,-74.24685755&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,4)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item5" onclick="selectPoint(5)">
+      <div class="num">6</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63735186</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 35A SUR 15A 57 02</div>
+        <div class="item-coords">4.57533, -74.24600</div>
+        <div class="foto-fachada-panel visible" id="foto5">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=116FvihFZAibPeeXhlk-u_Cz_Rs65hb6w&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=116FvihFZAibPeeXhlk-u_Cz_Rs65hb6w&sz=w1000','CL 35A SUR 15A 57 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=116FvihFZAibPeeXhlk-u_Cz_Rs65hb6w&sz=w1000','CL 35A SUR 15A 57 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57533452,-74.24600213" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57533452,-74.24600213&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,5)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item6" onclick="selectPoint(6)">
+      <div class="num">7</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61316184</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 35A SUR 15H 58 01</div>
+        <div class="item-coords">4.57648, -74.24558</div>
+        <div class="foto-fachada-panel visible" id="foto6">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=16aRcr80wIMhYyJien4vkxhBVwEdvWI7f&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=16aRcr80wIMhYyJien4vkxhBVwEdvWI7f&sz=w1000','CL 35A SUR 15H 58 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=16aRcr80wIMhYyJien4vkxhBVwEdvWI7f&sz=w1000','CL 35A SUR 15H 58 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57648005,-74.24557946" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57648005,-74.24557946&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,6)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item7" onclick="selectPoint(7)">
+      <div class="num">8</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61467043</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 15C 36B SUR 30 02</div>
+        <div class="item-coords">4.57569, -74.24712</div>
+        <div class="foto-fachada-panel visible" id="foto7">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1xWTiSTxwqQBjKBwEe5_T_GEPxYodK_Ho&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1xWTiSTxwqQBjKBwEe5_T_GEPxYodK_Ho&sz=w1000','KR 15C 36B SUR 30 02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1xWTiSTxwqQBjKBwEe5_T_GEPxYodK_Ho&sz=w1000','KR 15C 36B SUR 30 02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57569141,-74.24711964" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57569141,-74.24711964&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,7)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item8" onclick="selectPoint(8)">
+      <div class="num">9</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61815284</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 15I 36 SUR 77 01 00001</div>
+        <div class="item-coords">4.57659, -74.24643</div>
+        <div class="foto-fachada-panel visible" id="foto8">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1R9igK9GQkBvG6PPTOVe-tsa_rmyjeDdb&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1R9igK9GQkBvG6PPTOVe-tsa_rmyjeDdb&sz=w1000','KR 15I 36 SUR 77 01 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1R9igK9GQkBvG6PPTOVe-tsa_rmyjeDdb&sz=w1000','KR 15I 36 SUR 77 01 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57659412,-74.24643483" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57659412,-74.24643483&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,8)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item9" onclick="selectPoint(9)">
+      <div class="num">10</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63208666</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 39 SUR 16J 20 LOC 01</div>
+        <div class="item-coords">4.57914, -74.24844</div>
+        <div class="foto-fachada-panel visible" id="foto9">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1lLZQgS6DN-sut7j9oHIXHJs7hmPnm158&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1lLZQgS6DN-sut7j9oHIXHJs7hmPnm158&sz=w1000','CL 39 SUR 16J 20 LOC 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1lLZQgS6DN-sut7j9oHIXHJs7hmPnm158&sz=w1000','CL 39 SUR 16J 20 LOC 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5791412,-74.2484448" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5791412,-74.2484448&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,9)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item10" onclick="selectPoint(10)">
+      <div class="num">11</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62748324</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 7 15 9 T08 00502</div>
+        <div class="item-coords">4.58061, -74.24027</div>
+        <div class="foto-fachada-panel visible" id="foto10">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1dIi47IxrUp9FncxoyXubqGA800TDTU6-&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1dIi47IxrUp9FncxoyXubqGA800TDTU6-&sz=w1000','CL 7 15 9 T08 00502')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1dIi47IxrUp9FncxoyXubqGA800TDTU6-&sz=w1000','CL 7 15 9 T08 00502')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58060781,-74.24027442" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58060781,-74.24027442&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,10)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item11" onclick="selectPoint(11)">
+      <div class="num">12</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62531552</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 13 4B 35 T12 00602</div>
+        <div class="item-coords">4.58034, -74.23935</div>
+        <div class="foto-fachada-panel visible" id="foto11">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1etEbe9Uj2_t3BvHkjoQU_EXhmXbNT4Bf&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1etEbe9Uj2_t3BvHkjoQU_EXhmXbNT4Bf&sz=w1000','KR 13 4B 35 T12 00602')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1etEbe9Uj2_t3BvHkjoQU_EXhmXbNT4Bf&sz=w1000','KR 13 4B 35 T12 00602')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58033641,-74.23935467" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58033641,-74.23935467&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,11)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item12" onclick="selectPoint(12)">
+      <div class="num">13</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62538435</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 13 4B 35 T14 00103</div>
+        <div class="item-coords">4.58042, -74.23899</div>
+        <div class="foto-fachada-panel visible" id="foto12">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1cjwA9RBeVfGizHP-69wBRNF4J-kQmkAo&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1cjwA9RBeVfGizHP-69wBRNF4J-kQmkAo&sz=w1000','KR 13 4B 35 T14 00103')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1cjwA9RBeVfGizHP-69wBRNF4J-kQmkAo&sz=w1000','KR 13 4B 35 T14 00103')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.58041772,-74.23898716" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.58041772,-74.23898716&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,12)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item13" onclick="selectPoint(13)">
+      <div class="num">14</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62562466</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 16G 30 SUR 23 02 00001</div>
+        <div class="item-coords">4.57879, -74.24291</div>
+        <div class="foto-fachada-panel visible" id="foto13">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1vdmhPbqx3L3nGImB0ccjEwoh8ZaiyiNq&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1vdmhPbqx3L3nGImB0ccjEwoh8ZaiyiNq&sz=w1000','KR 16G 30 SUR 23 02 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1vdmhPbqx3L3nGImB0ccjEwoh8ZaiyiNq&sz=w1000','KR 16G 30 SUR 23 02 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57878896,-74.24291165" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57878896,-74.24291165&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,13)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item14" onclick="selectPoint(14)">
+      <div class="num">15</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62438460</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 16L 22 SUR 24 00001</div>
+        <div class="item-coords">4.57973, -74.24127</div>
+        <div class="foto-fachada-panel visible" id="foto14">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1u73MVwz5BvY1LUQ2CHNLTQH9tefrZiQ5&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1u73MVwz5BvY1LUQ2CHNLTQH9tefrZiQ5&sz=w1000','KR 16L 22 SUR 24 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1u73MVwz5BvY1LUQ2CHNLTQH9tefrZiQ5&sz=w1000','KR 16L 22 SUR 24 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57973353,-74.24126573" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57973353,-74.24126573&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,14)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item15" onclick="selectPoint(15)">
+      <div class="num">16</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62128058</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 17 32B SUR 128 T07 00103</div>
+        <div class="item-coords">4.57909, -74.24409</div>
+        <div class="foto-fachada-panel visible" id="foto15">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1gwCSgg74noCjtbx1Mr2ZZpK7vHX-ouLL&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1gwCSgg74noCjtbx1Mr2ZZpK7vHX-ouLL&sz=w1000','KR 17 32B SUR 128 T07 00103')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1gwCSgg74noCjtbx1Mr2ZZpK7vHX-ouLL&sz=w1000','KR 17 32B SUR 128 T07 00103')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57909374,-74.24408853" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57909374,-74.24408853&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,15)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item16" onclick="selectPoint(16)">
+      <div class="num">17</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62560357</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 18A SUR 16G 16 E07</div>
+        <div class="item-coords">4.57930, -74.23956</div>
+        <div class="foto-fachada-panel visible" id="foto16">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1WT1BY5I6GuqgWJmfGOFMVEdoR13gO5xX&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1WT1BY5I6GuqgWJmfGOFMVEdoR13gO5xX&sz=w1000','CL 18A SUR 16G 16 E07')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1WT1BY5I6GuqgWJmfGOFMVEdoR13gO5xX&sz=w1000','CL 18A SUR 16G 16 E07')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57929785,-74.23955873" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57929785,-74.23955873&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,16)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item17" onclick="selectPoint(17)">
+      <div class="num">18</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 64125550</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 16B 17A SUR 23 00001</div>
+        <div class="item-coords">4.57833, -74.23884</div>
+        <div class="foto-fachada-panel visible" id="foto17">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1CRjyzNUiroUFfDuKkU9No0pBJsEJY5ih&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1CRjyzNUiroUFfDuKkU9No0pBJsEJY5ih&sz=w1000','KR 16B 17A SUR 23 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1CRjyzNUiroUFfDuKkU9No0pBJsEJY5ih&sz=w1000','KR 16B 17A SUR 23 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5783252,-74.23883803" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5783252,-74.23883803&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,17)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item18" onclick="selectPoint(18)">
+      <div class="num">19</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62551009</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 16H 17 SUR 56 E02</div>
+        <div class="item-coords">4.57956, -74.23916</div>
+        <div class="foto-fachada-panel visible" id="foto18">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1XC19q3AyPK0qRrceBvbYNV_9dTuBhKGX&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1XC19q3AyPK0qRrceBvbYNV_9dTuBhKGX&sz=w1000','KR 16H 17 SUR 56 E02')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1XC19q3AyPK0qRrceBvbYNV_9dTuBhKGX&sz=w1000','KR 16H 17 SUR 56 E02')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57956176,-74.23915589" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57956176,-74.23915589&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,18)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item19" onclick="selectPoint(19)">
+      <div class="num">20</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60582619</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 8 17 SUR 52</div>
+        <div class="item-coords">4.56448, -74.23658</div>
+        <div class="foto-fachada-panel visible" id="foto19">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1mo_uYIKHslh8cECwhQU3YHQaETmvB50q&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1mo_uYIKHslh8cECwhQU3YHQaETmvB50q&sz=w1000','KR 8 17 SUR 52')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1mo_uYIKHslh8cECwhQU3YHQaETmvB50q&sz=w1000','KR 8 17 SUR 52')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.56447616,-74.23658073" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.56447616,-74.23658073&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,19)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item20" onclick="selectPoint(20)">
+      <div class="num">21</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60755075</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 10B 18 SUR 63</div>
+        <div class="item-coords">4.56672, -74.23776</div>
+        <div class="foto-fachada-panel visible" id="foto20">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1y144cpbUxSEY6MjGnc-C5YvLiMJWYXbQ&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1y144cpbUxSEY6MjGnc-C5YvLiMJWYXbQ&sz=w1000','KR 10B 18 SUR 63')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1y144cpbUxSEY6MjGnc-C5YvLiMJWYXbQ&sz=w1000','KR 10B 18 SUR 63')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.56671905,-74.23776326" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.56671905,-74.23776326&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,20)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item21" onclick="selectPoint(21)">
+      <div class="num">22</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 64452303</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 10G 19 SUR 28</div>
+        <div class="item-coords">4.56733, -74.23804</div>
+        <div class="foto-fachada-panel visible" id="foto21">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=10BJcyg1_HieeubSioRmHDxd2OjFjaI1j&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=10BJcyg1_HieeubSioRmHDxd2OjFjaI1j&sz=w1000','KR 10G 19 SUR 28')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=10BJcyg1_HieeubSioRmHDxd2OjFjaI1j&sz=w1000','KR 10G 19 SUR 28')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.56732562,-74.238042" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.56732562,-74.238042&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,21)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item22" onclick="selectPoint(22)">
+      <div class="num">23</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62217058</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 10G 19 SUR 49</div>
+        <div class="item-coords">4.56747, -74.23818</div>
+        <div class="foto-fachada-panel visible" id="foto22">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1qqYi_DAiwwbKt48GvBKkiUPF9xIO63Co&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1qqYi_DAiwwbKt48GvBKkiUPF9xIO63Co&sz=w1000','KR 10G 19 SUR 49')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1qqYi_DAiwwbKt48GvBKkiUPF9xIO63Co&sz=w1000','KR 10G 19 SUR 49')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5674702,-74.2381765" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5674702,-74.2381765&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,22)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item23" onclick="selectPoint(23)">
+      <div class="num">24</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60581635</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12C 19 SUR 59</div>
+        <div class="item-coords">4.57076, -74.23854</div>
+        <div class="foto-fachada-panel visible" id="foto23">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1VpN_3kJMW_hZxkIcRkOLRgMFXGPpLzd2&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1VpN_3kJMW_hZxkIcRkOLRgMFXGPpLzd2&sz=w1000','KR 12C 19 SUR 59')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1VpN_3kJMW_hZxkIcRkOLRgMFXGPpLzd2&sz=w1000','KR 12C 19 SUR 59')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57076064,-74.23853921" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57076064,-74.23853921&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,23)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item24" onclick="selectPoint(24)">
+      <div class="num">25</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61824427</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 12G 19 SUR 57</div>
+        <div class="item-coords">4.57152, -74.23845</div>
+        <div class="foto-fachada-panel visible" id="foto24">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1grTPxwq_YVIvCvR1w3_BgIZfBDnRy-tr&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1grTPxwq_YVIvCvR1w3_BgIZfBDnRy-tr&sz=w1000','KR 12G 19 SUR 57')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1grTPxwq_YVIvCvR1w3_BgIZfBDnRy-tr&sz=w1000','KR 12G 19 SUR 57')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57152348,-74.23844759" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57152348,-74.23844759&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,24)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item25" onclick="selectPoint(25)">
+      <div class="num">26</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60953290</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 16A SUR 14 21</div>
+        <div class="item-coords">4.57409, -74.23619</div>
+        <div class="foto-fachada-panel visible" id="foto25">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1Ewgej07i45D3M3KOl1WRY56ONKFekFWs&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1Ewgej07i45D3M3KOl1WRY56ONKFekFWs&sz=w1000','CL 16A SUR 14 21')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1Ewgej07i45D3M3KOl1WRY56ONKFekFWs&sz=w1000','CL 16A SUR 14 21')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57409388,-74.23618617" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57409388,-74.23618617&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,25)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item26" onclick="selectPoint(26)">
+      <div class="num">27</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 60802760</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 15 24 SUR 33 00001</div>
+        <div class="item-coords">4.57433, -74.24101</div>
+        <div class="foto-fachada-panel visible" id="foto26">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1cOB6BGAxS7FvNGkAZJFy5WyhOkZqJ582&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1cOB6BGAxS7FvNGkAZJFy5WyhOkZqJ582&sz=w1000','KR 15 24 SUR 33 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1cOB6BGAxS7FvNGkAZJFy5WyhOkZqJ582&sz=w1000','KR 15 24 SUR 33 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5743288,-74.24100878" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5743288,-74.24100878&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,26)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item27" onclick="selectPoint(27)">
+      <div class="num">28</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61029938</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">TV 18 1 SUR 33</div>
+        <div class="item-coords">4.57394, -74.24196</div>
+        <div class="foto-fachada-panel visible" id="foto27">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1kl2ou6C8OkPIMqjXoFD9fedkhXU4TyO2&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kl2ou6C8OkPIMqjXoFD9fedkhXU4TyO2&sz=w1000','TV 18 1 SUR 33')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kl2ou6C8OkPIMqjXoFD9fedkhXU4TyO2&sz=w1000','TV 18 1 SUR 33')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5739438,-74.2419645" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5739438,-74.2419645&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,27)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item28" onclick="selectPoint(28)">
+      <div class="num">29</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62640583</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 14B 31D SUR 3 00001</div>
+        <div class="item-coords">4.57315, -74.24324</div>
+        <div class="foto-fachada-panel visible" id="foto28">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1CwBiQdUCGbAQdsnRgxZDGppgCKXh85x2&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1CwBiQdUCGbAQdsnRgxZDGppgCKXh85x2&sz=w1000','KR 14B 31D SUR 3 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1CwBiQdUCGbAQdsnRgxZDGppgCKXh85x2&sz=w1000','KR 14B 31D SUR 3 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57315411,-74.2432358" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57315411,-74.2432358&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,28)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item29" onclick="selectPoint(29)">
+      <div class="num">30</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61134705</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 33F SUR 14B 83</div>
+        <div class="item-coords">4.57379, -74.24518</div>
+        <div class="foto-fachada-panel visible" id="foto29">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1kDlDq99dtp1c0T6fWxbyMDf0OHpfBBbn&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kDlDq99dtp1c0T6fWxbyMDf0OHpfBBbn&sz=w1000','CL 33F SUR 14B 83')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1kDlDq99dtp1c0T6fWxbyMDf0OHpfBBbn&sz=w1000','CL 33F SUR 14B 83')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57378849,-74.24517947" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57378849,-74.24517947&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,29)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item30" onclick="selectPoint(30)">
+      <div class="num">31</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63874907</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 33G SUR 14B 16</div>
+        <div class="item-coords">4.57341, -74.24547</div>
+        <div class="foto-fachada-panel visible" id="foto30">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1HX8bjXawvgecGKnTVqUulcBLqXgzcESU&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1HX8bjXawvgecGKnTVqUulcBLqXgzcESU&sz=w1000','CL 33G SUR 14B 16')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1HX8bjXawvgecGKnTVqUulcBLqXgzcESU&sz=w1000','CL 33G SUR 14B 16')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.573412,-74.24546638" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.573412,-74.24546638&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,30)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item31" onclick="selectPoint(31)">
+      <div class="num">32</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61778584</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 36A SUR 13 48</div>
+        <div class="item-coords">4.57372, -74.24740</div>
+        <div class="foto-fachada-panel visible" id="foto31">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1sI95QIsdDc3p5_1zzx5Oq1UVUkwtJ_V7&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1sI95QIsdDc3p5_1zzx5Oq1UVUkwtJ_V7&sz=w1000','CL 36A SUR 13 48')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1sI95QIsdDc3p5_1zzx5Oq1UVUkwtJ_V7&sz=w1000','CL 36A SUR 13 48')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.57371657,-74.24740194" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.57371657,-74.24740194&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,31)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item32" onclick="selectPoint(32)">
+      <div class="num">33</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 63286492</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">CL 31F SUR 12 8 01</div>
+        <div class="item-coords">4.56936, -74.24264</div>
+        <div class="foto-fachada-panel visible" id="foto32">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1W-wtul4BCUjtaCarMV1A-AWIH-EkcaEz&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1W-wtul4BCUjtaCarMV1A-AWIH-EkcaEz&sz=w1000','CL 31F SUR 12 8 01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1W-wtul4BCUjtaCarMV1A-AWIH-EkcaEz&sz=w1000','CL 31F SUR 12 8 01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.56935983,-74.24263815" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.56935983,-74.24263815&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,32)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item33" onclick="selectPoint(33)">
+      <div class="num">34</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 61978064</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 11 31B SUR 55 B08 C34 00001</div>
+        <div class="item-coords">4.56822, -74.24227</div>
+        <div class="foto-fachada-panel visible" id="foto33">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1n_l6pMSXRdQ9D1X5q5o44xhZ6509j5Y9&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1n_l6pMSXRdQ9D1X5q5o44xhZ6509j5Y9&sz=w1000','KR 11 31B SUR 55 B08 C34 00001')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1n_l6pMSXRdQ9D1X5q5o44xhZ6509j5Y9&sz=w1000','KR 11 31B SUR 55 B08 C34 00001')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.5682182,-74.24226665" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.5682182,-74.24226665&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,33)">✓ Listo</button>
+        </div>
+      </div>
+    </div><div class="item" id="item34" onclick="selectPoint(34)">
+      <div class="num">35</div>
+      <div class="item-info">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px"><span class="cuenta-badge">📋 62062944</span><span class="tipo-badge rc">🔌 RECONEXIÓN</span></div>
+        <div class="item-name">KR 13 31H SUR 40 B14 C01</div>
+        <div class="item-coords">4.56908, -74.24318</div>
+        <div class="foto-fachada-panel visible" id="foto34">
+        <div class="foto-fachada-header">📸 FOTO FACHADA — reconexión</div>
+        <img class="foto-fachada-img" src="https://drive.google.com/thumbnail?id=1ba-HWK3QQB9cCVT4AVwjlTzznPKs72HE&sz=w1000" alt="Foto Fachada" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ba-HWK3QQB9cCVT4AVwjlTzznPKs72HE&sz=w1000','KR 13 31H SUR 40 B14 C01')">
+        <div class="foto-fachada-expand" onclick="openLightbox('https://drive.google.com/thumbnail?id=1ba-HWK3QQB9cCVT4AVwjlTzznPKs72HE&sz=w1000','KR 13 31H SUR 40 B14 C01')">🔍 Ver a pantalla completa</div>
+      </div>
+        <div class="item-btns">
+          <a href="https://www.google.com/maps/search/?api=1&query=4.56908467,-74.2431832" target="_blank" class="nav-btn g">🗺 Google Maps</a>
+          <a href="https://waze.com/ul?ll=4.56908467,-74.2431832&navigate=yes" target="_blank" class="nav-btn w">🚗 Waze</a>
+          <button class="btn-del" onclick="eliminarItem(event,34)">✓ Listo</button>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <div id="map-wrap">
+    <div id="leafmap"></div>
+    <button id="btn-expand" onclick="toggleSidebar()" title="Mostrar lista">☰</button>
+    <button class="btn-fitall" onclick="fitAll()">🗺 Ver todos</button>
+    <button class="btn-geo" id="btnGeo" onclick="toggleGeo()">📍 Mi ubicación</button>
+    <div id="offline-banner" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:1002;background:#1e293b;border:1px solid #f59e0b;border-radius:8px;padding:8px 14px;align-items:center;gap:8px;max-width:90%;box-shadow:0 4px 16px rgba(0,0,0,.5)">
+      <span style="font-size:16px">📶</span>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#f59e0b;font-family:monospace">SIN SEÑAL — modo offline</div>
+        <div style="font-size:10px;color:#94a3b8">La lista y los botones de navegación funcionan con normalidad</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close" onclick="closeLightbox()">✕</span>
+  <img id="lightboxImg" src="" alt="FotoFachada">
+  <div class="lightbox-label" id="lightboxLabel"></div>
+</div>
+
+<script>
+const pts = [{"lat":4.53892573,"lng":-74.28166686,"name":"KR 11 1B 12 01","cuenta":"63500125","nic":"63500125","fotoUrl":"","tipoOp":"RC00"},{"lat":4.57677782,"lng":-74.23831886,"name":"CL 16 SUR 15J 73 257","cuenta":"62317329","nic":"62317329","fotoUrl":"https://drive.google.com/thumbnail?id=1UBx7wbgYzs3hCKDKXNRgNyOZECJ3m6SM&sz=w1000","tipoOp":"RC00"},{"lat":4.57533976,"lng":-74.2385531,"name":"KR 15C 19 SUR 17 02","cuenta":"62579255","nic":"62579255","fotoUrl":"https://drive.google.com/thumbnail?id=13khciic2O7p-ttLLMcF8rs4D_vL1HyNA&sz=w1000","tipoOp":"RC00"},{"lat":4.57595676,"lng":-74.242133,"name":"KR 15H 28 SUR 40 00001","cuenta":"63099492","nic":"63099492","fotoUrl":"","tipoOp":"RC00"},{"lat":4.57553791,"lng":-74.24685755,"name":"CL 1C 26 13","cuenta":"61706766","nic":"61706766","fotoUrl":"https://drive.google.com/thumbnail?id=1o1C261_0K36uGFJcq-KBHVfF0GIXfp6J&sz=w1000","tipoOp":"RC00"},{"lat":4.57533452,"lng":-74.24600213,"name":"CL 35A SUR 15A 57 02","cuenta":"63735186","nic":"63735186","fotoUrl":"https://drive.google.com/thumbnail?id=116FvihFZAibPeeXhlk-u_Cz_Rs65hb6w&sz=w1000","tipoOp":"RC00"},{"lat":4.57648005,"lng":-74.24557946,"name":"CL 35A SUR 15H 58 01","cuenta":"61316184","nic":"61316184","fotoUrl":"https://drive.google.com/thumbnail?id=16aRcr80wIMhYyJien4vkxhBVwEdvWI7f&sz=w1000","tipoOp":"RC00"},{"lat":4.57569141,"lng":-74.24711964,"name":"KR 15C 36B SUR 30 02","cuenta":"61467043","nic":"61467043","fotoUrl":"https://drive.google.com/thumbnail?id=1xWTiSTxwqQBjKBwEe5_T_GEPxYodK_Ho&sz=w1000","tipoOp":"RC00"},{"lat":4.57659412,"lng":-74.24643483,"name":"KR 15I 36 SUR 77 01 00001","cuenta":"61815284","nic":"61815284","fotoUrl":"https://drive.google.com/thumbnail?id=1R9igK9GQkBvG6PPTOVe-tsa_rmyjeDdb&sz=w1000","tipoOp":"RC00"},{"lat":4.5791412,"lng":-74.2484448,"name":"CL 39 SUR 16J 20 LOC 01","cuenta":"63208666","nic":"63208666","fotoUrl":"https://drive.google.com/thumbnail?id=1lLZQgS6DN-sut7j9oHIXHJs7hmPnm158&sz=w1000","tipoOp":"RC00"},{"lat":4.58060781,"lng":-74.24027442,"name":"CL 7 15 9 T08 00502","cuenta":"62748324","nic":"62748324","fotoUrl":"https://drive.google.com/thumbnail?id=1dIi47IxrUp9FncxoyXubqGA800TDTU6-&sz=w1000","tipoOp":"RC00"},{"lat":4.58033641,"lng":-74.23935467,"name":"KR 13 4B 35 T12 00602","cuenta":"62531552","nic":"62531552","fotoUrl":"https://drive.google.com/thumbnail?id=1etEbe9Uj2_t3BvHkjoQU_EXhmXbNT4Bf&sz=w1000","tipoOp":"RC00"},{"lat":4.58041772,"lng":-74.23898716,"name":"KR 13 4B 35 T14 00103","cuenta":"62538435","nic":"62538435","fotoUrl":"https://drive.google.com/thumbnail?id=1cjwA9RBeVfGizHP-69wBRNF4J-kQmkAo&sz=w1000","tipoOp":"RC00"},{"lat":4.57878896,"lng":-74.24291165,"name":"KR 16G 30 SUR 23 02 00001","cuenta":"62562466","nic":"62562466","fotoUrl":"https://drive.google.com/thumbnail?id=1vdmhPbqx3L3nGImB0ccjEwoh8ZaiyiNq&sz=w1000","tipoOp":"RC00"},{"lat":4.57973353,"lng":-74.24126573,"name":"KR 16L 22 SUR 24 00001","cuenta":"62438460","nic":"62438460","fotoUrl":"https://drive.google.com/thumbnail?id=1u73MVwz5BvY1LUQ2CHNLTQH9tefrZiQ5&sz=w1000","tipoOp":"RC00"},{"lat":4.57909374,"lng":-74.24408853,"name":"KR 17 32B SUR 128 T07 00103","cuenta":"62128058","nic":"62128058","fotoUrl":"https://drive.google.com/thumbnail?id=1gwCSgg74noCjtbx1Mr2ZZpK7vHX-ouLL&sz=w1000","tipoOp":"RC00"},{"lat":4.57929785,"lng":-74.23955873,"name":"CL 18A SUR 16G 16 E07","cuenta":"62560357","nic":"62560357","fotoUrl":"https://drive.google.com/thumbnail?id=1WT1BY5I6GuqgWJmfGOFMVEdoR13gO5xX&sz=w1000","tipoOp":"RC00"},{"lat":4.5783252,"lng":-74.23883803,"name":"KR 16B 17A SUR 23 00001","cuenta":"64125550","nic":"64125550","fotoUrl":"https://drive.google.com/thumbnail?id=1CRjyzNUiroUFfDuKkU9No0pBJsEJY5ih&sz=w1000","tipoOp":"RC00"},{"lat":4.57956176,"lng":-74.23915589,"name":"KR 16H 17 SUR 56 E02","cuenta":"62551009","nic":"62551009","fotoUrl":"https://drive.google.com/thumbnail?id=1XC19q3AyPK0qRrceBvbYNV_9dTuBhKGX&sz=w1000","tipoOp":"RC00"},{"lat":4.56447616,"lng":-74.23658073,"name":"KR 8 17 SUR 52","cuenta":"60582619","nic":"60582619","fotoUrl":"https://drive.google.com/thumbnail?id=1mo_uYIKHslh8cECwhQU3YHQaETmvB50q&sz=w1000","tipoOp":"RC00"},{"lat":4.56671905,"lng":-74.23776326,"name":"KR 10B 18 SUR 63","cuenta":"60755075","nic":"60755075","fotoUrl":"https://drive.google.com/thumbnail?id=1y144cpbUxSEY6MjGnc-C5YvLiMJWYXbQ&sz=w1000","tipoOp":"RC00"},{"lat":4.56732562,"lng":-74.238042,"name":"KR 10G 19 SUR 28","cuenta":"64452303","nic":"64452303","fotoUrl":"https://drive.google.com/thumbnail?id=10BJcyg1_HieeubSioRmHDxd2OjFjaI1j&sz=w1000","tipoOp":"RC00"},{"lat":4.5674702,"lng":-74.2381765,"name":"KR 10G 19 SUR 49","cuenta":"62217058","nic":"62217058","fotoUrl":"https://drive.google.com/thumbnail?id=1qqYi_DAiwwbKt48GvBKkiUPF9xIO63Co&sz=w1000","tipoOp":"RC00"},{"lat":4.57076064,"lng":-74.23853921,"name":"KR 12C 19 SUR 59","cuenta":"60581635","nic":"60581635","fotoUrl":"https://drive.google.com/thumbnail?id=1VpN_3kJMW_hZxkIcRkOLRgMFXGPpLzd2&sz=w1000","tipoOp":"RC00"},{"lat":4.57152348,"lng":-74.23844759,"name":"KR 12G 19 SUR 57","cuenta":"61824427","nic":"61824427","fotoUrl":"https://drive.google.com/thumbnail?id=1grTPxwq_YVIvCvR1w3_BgIZfBDnRy-tr&sz=w1000","tipoOp":"RC00"},{"lat":4.57409388,"lng":-74.23618617,"name":"CL 16A SUR 14 21","cuenta":"60953290","nic":"60953290","fotoUrl":"https://drive.google.com/thumbnail?id=1Ewgej07i45D3M3KOl1WRY56ONKFekFWs&sz=w1000","tipoOp":"RC00"},{"lat":4.5743288,"lng":-74.24100878,"name":"KR 15 24 SUR 33 00001","cuenta":"60802760","nic":"60802760","fotoUrl":"https://drive.google.com/thumbnail?id=1cOB6BGAxS7FvNGkAZJFy5WyhOkZqJ582&sz=w1000","tipoOp":"RC00"},{"lat":4.5739438,"lng":-74.2419645,"name":"TV 18 1 SUR 33","cuenta":"61029938","nic":"61029938","fotoUrl":"https://drive.google.com/thumbnail?id=1kl2ou6C8OkPIMqjXoFD9fedkhXU4TyO2&sz=w1000","tipoOp":"RC00"},{"lat":4.57315411,"lng":-74.2432358,"name":"KR 14B 31D SUR 3 00001","cuenta":"62640583","nic":"62640583","fotoUrl":"https://drive.google.com/thumbnail?id=1CwBiQdUCGbAQdsnRgxZDGppgCKXh85x2&sz=w1000","tipoOp":"RC00"},{"lat":4.57378849,"lng":-74.24517947,"name":"CL 33F SUR 14B 83","cuenta":"61134705","nic":"61134705","fotoUrl":"https://drive.google.com/thumbnail?id=1kDlDq99dtp1c0T6fWxbyMDf0OHpfBBbn&sz=w1000","tipoOp":"RC00"},{"lat":4.573412,"lng":-74.24546638,"name":"CL 33G SUR 14B 16","cuenta":"63874907","nic":"63874907","fotoUrl":"https://drive.google.com/thumbnail?id=1HX8bjXawvgecGKnTVqUulcBLqXgzcESU&sz=w1000","tipoOp":"RC00"},{"lat":4.57371657,"lng":-74.24740194,"name":"CL 36A SUR 13 48","cuenta":"61778584","nic":"61778584","fotoUrl":"https://drive.google.com/thumbnail?id=1sI95QIsdDc3p5_1zzx5Oq1UVUkwtJ_V7&sz=w1000","tipoOp":"RC00"},{"lat":4.56935983,"lng":-74.24263815,"name":"CL 31F SUR 12 8 01","cuenta":"63286492","nic":"63286492","fotoUrl":"https://drive.google.com/thumbnail?id=1W-wtul4BCUjtaCarMV1A-AWIH-EkcaEz&sz=w1000","tipoOp":"RC00"},{"lat":4.5682182,"lng":-74.24226665,"name":"KR 11 31B SUR 55 B08 C34 00001","cuenta":"61978064","nic":"61978064","fotoUrl":"https://drive.google.com/thumbnail?id=1n_l6pMSXRdQ9D1X5q5o44xhZ6509j5Y9&sz=w1000","tipoOp":"RC00"},{"lat":4.56908467,"lng":-74.2431832,"name":"KR 13 31H SUR 40 B14 C01","cuenta":"62062944","nic":"62062944","fotoUrl":"https://drive.google.com/thumbnail?id=1ba-HWK3QQB9cCVT4AVwjlTzznPKs72HE&sz=w1000","tipoOp":"RC00"}];
+let activeIdx = -1;
+let markers = [];
+
+// ─── TOGGLE SIDEBAR ─────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const expandBtn = document.getElementById('btn-expand');
+  const collapsed = sb.classList.toggle('collapsed');
+  expandBtn.classList.toggle('visible', collapsed);
+  setTimeout(() => map.invalidateSize(), 300);
+}
+
+// ─── PERSISTENCIA localStorage ──────────────────
+const STORAGE_KEY = 'progreso_' + location.pathname.split('/').pop().replace(/[^a-zA-Z0-9]/g,'_');
+
+function cargarProgreso() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch(e) { return []; }
+}
+function guardarProgreso(listos) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(listos)); } catch(e) {}
+}
+function actualizarContador() {
+  const listos = cargarProgreso();
+  const total = pts.length;
+  const hechos = listos.length;
+  const el = document.getElementById('prog-label');
+  if (el) el.textContent = hechos + '/' + total + ' listos';
+}
+// ────────────────────────────────────────────────
+
+const map = L.map('leafmap', {zoomControl:true});
+
+// ── TILES con fallback offline ──
+const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 19,
+  errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+}).addTo(map);
+
+// Banner offline
+const offlineBanner = document.getElementById('offline-banner');
+let offlineTiles = 0, totalTiles = 0;
+tileLayer.on('tileloadstart', () => totalTiles++);
+tileLayer.on('tileload', () => {
+  if (offlineBanner) offlineBanner.style.display = 'none';
+  const lbl = document.getElementById('cache-lbl');
+  if (lbl) { lbl.textContent = '✅ offline listo'; lbl.style.color = '#00ff88'; }
+});
+tileLayer.on('tileerror', () => {
+  offlineTiles++;
+  if (offlineBanner && offlineTiles > 2) {
+    offlineBanner.style.display = 'flex';
+  }
+});
+
+// Detector de conexión
+window.addEventListener('online', () => { if (offlineBanner) offlineBanner.style.display = 'none'; tileLayer.redraw(); });
+window.addEventListener('offline', () => { if (offlineBanner) offlineBanner.style.display = 'flex'; });
+
+function makeIcon(i, isActive) {
+  const tipo = pts[i].tipoOp || '';
+  const cls = tipo === 'RC00' ? 'rc' : tipo === 'DC00' ? 'dc' : tipo === 'ZVCL' ? 'zv' : '';
+  return L.divIcon({
+    className:'',
+    html:`<div class="custom-marker${cls?' '+cls:''}${isActive?' active':''}">${i+1}</div>`,
+    iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-14]
+  });
+}
+
+pts.forEach((p,i) => {
+  const label = p.name || 'Punto '+(i+1);
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+  const waze = `https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes`;
+  const cuentaHtml = p.cuenta ? `<div class="popup-cuenta">📋 ${p.cuenta}</div>` : '';
+  let tipoHtml = '';
+  if (p.tipoOp === 'RC00') tipoHtml = `<div style="display:inline-block;background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">🔌 RECONEXIÓN</div>`;
+  else if (p.tipoOp === 'DC00') tipoHtml = `<div style="display:inline-block;background:rgba(255,50,50,0.15);color:#ff6b6b;border:1px solid rgba(255,50,50,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">✂ SUSPENSIÓN</div>`;
+  else if (p.tipoOp === 'ZVCL') tipoHtml = `<div style="display:inline-block;background:rgba(255,200,0,0.15);color:#fbbf24;border:1px solid rgba(255,200,0,0.35);border-radius:4px;font-size:10px;font-weight:700;padding:1px 8px;font-family:monospace;margin-bottom:5px">⚠ ZVCL</div>`;
+  let fotoPopupHtml = '';
+  if (p.fotoUrl && p.tipoOp === 'RC00') {
+    fotoPopupHtml = `<div style="margin:6px 0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,107,53,0.4)">
+      <div style="background:rgba(255,107,53,0.2);color:#ff9a6c;font-size:10px;font-weight:700;padding:3px 8px;font-family:monospace">📸 FOTO FACHADA</div>
+      <img src="${p.fotoUrl}" style="width:100%;object-fit:contain;background:#000;display:block;cursor:pointer" onclick="openLightbox('${p.fotoUrl}','${label.replace(/'/g,'')}')" alt="FotoFachada">
+      <div style="background:rgba(0,0,0,0.5);color:#ccc;text-align:center;font-size:10px;padding:3px;font-family:monospace;cursor:pointer" onclick="openLightbox('${p.fotoUrl}','${label.replace(/'/g,'')}')">🔍 Ver completa</div>
+    </div>`;
+  }
+  const popup = `<div class="popup-title">${i+1}. ${label}</div>${tipoHtml}${cuentaHtml}<div class="popup-coords">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>${fotoPopupHtml}<div class="popup-btns"><a href="${gmaps}" target="_blank" class="pg">🗺 Google Maps</a><a href="${waze}" target="_blank" class="pw">🚗 Waze</a></div>`;
+  const marker = L.marker([p.lat,p.lng],{icon:makeIcon(i,false)}).addTo(map).bindPopup(popup,{maxWidth:260});
+  marker.on('click',()=>selectPoint(i));
+  markers.push(marker);
+});
+
+// ─── RESTAURAR PROGRESO AL CARGAR ──────────────
+(function restaurarProgreso() {
+  const listos = cargarProgreso();
+  if (!listos.length) { fitAll(); return; }
+  const sidebar = document.getElementById('list');
+  listos.forEach(i => {
+    const el = document.getElementById('item' + i);
+    if (!el) return;
+    el.classList.add('done');
+    if (markers[i]) map.removeLayer(markers[i]);
+    if (sidebar) sidebar.appendChild(el);
+  });
+  actualizarContador();
+  fitAll();
+})();
+
+function fitAll() {
+  const visibles = markers.filter(m => map.hasLayer(m));
+  const grupo = visibles.length ? visibles : markers;
+  if (!grupo.length) return;
+  map.fitBounds(L.featureGroup(grupo).getBounds().pad(0.12));
+}
+
+function eliminarItem(e, i) {
+  e.stopPropagation();
+  const el = document.getElementById('item' + i);
+  if (!el) return;
+  let listos = cargarProgreso();
+  if (el.classList.contains('done')) {
+    // Desmarcar: restaurar punto en el mapa
+    el.classList.remove('done');
+    if (markers[i]) {
+      markers[i].addTo(map);
+      markers[i].setIcon(makeIcon(i, false));
+    }
+    listos = listos.filter(x => x !== i);
+  } else {
+    // Marcar como listo: quitar punto del mapa
+    el.classList.add('done');
+    if (markers[i]) map.removeLayer(markers[i]);
+    // Mover al final de la lista
+    const sidebar = el.parentNode;
+    sidebar.appendChild(el);
+    if (!listos.includes(i)) listos.push(i);
+  }
+  guardarProgreso(listos);
+  actualizarContador();
+}
+
+function selectPoint(i) {
+  if(activeIdx>=0){
+    markers[activeIdx].setIcon(makeIcon(activeIdx,false));
+    const prev=document.getElementById('item'+activeIdx);
+    if(prev) prev.classList.remove('active');
+  }
+  activeIdx=i;
+  markers[i].setIcon(makeIcon(i,true));
+  markers[i].openPopup();
+  map.setView([pts[i].lat,pts[i].lng],17);
+  const el=document.getElementById('item'+i);
+  if(el){el.classList.add('active');el.scrollIntoView({behavior:'smooth',block:'nearest'});}
+}
+
+function filterList(q) {
+  q=q.toLowerCase();
+  document.querySelectorAll('.item').forEach(el=>{
+    el.style.display=el.innerText.toLowerCase().includes(q)?'':'none';
+  });
+}
+function openLightbox(url, label) {
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightboxLabel').textContent = label;
+  document.getElementById('lightbox').classList.add('visible');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('visible');
+  document.getElementById('lightboxImg').src = '';
+}
+
+// ── GEOLOCALIZACIÓN ──────────────────────────────
+let geoOn=false, watchId=null, pinMarker=null, pinCircle=null;
+
+function hav(a,b,c,d){
+  const R=6371,dL=(c-a)*Math.PI/180,dG=(d-b)*Math.PI/180;
+  const x=Math.sin(dL/2)**2+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dG/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+function fmtD(k){return k<1?Math.round(k*1000)+' m':k.toFixed(1)+' km';}
+function cls(k){return k<0.3?'cerca':k<1.5?'medio':'lejos';}
+
+function updateDists(lat,lng){
+  pts.forEach((p,i)=>{
+    p._d=hav(lat,lng,p.lat,p.lng);
+    const el=document.getElementById('item'+i);
+    if(!el)return;
+    let b=el.querySelector('.dbadge');
+    if(!b){
+      b=document.createElement('span');
+      b.className='dbadge';
+      const c=el.querySelector('.item-coords');
+      if(c)c.after(b);
+    }
+    b.className='dbadge '+cls(p._d);
+    b.textContent='📏 '+fmtD(p._d);
+  });
+  document.getElementById('btnSort').style.display='block';
+  const near=pts.reduce((a,p,i)=>p._d<(a._d??9999)?{...p,i}:a,{});
+  document.getElementById('geoTxt').textContent='Más cercano: #'+(near.i+1)+' · '+fmtD(near._d);
+}
+
+function sortByDist(){
+  const list=document.getElementById('list');
+  const pend=[...list.querySelectorAll('.item:not(.done)')];
+  const done=[...list.querySelectorAll('.item.done')];
+  pend.sort((a,b)=>(pts[+a.id.replace('item','')]._d||999)-(pts[+b.id.replace('item','')]._d||999));
+  list.innerHTML='';
+  [...pend,...done].forEach(e=>list.appendChild(e));
+  list.scrollTop=0;
+}
+
+function toggleGeo(){
+  const btn=document.getElementById('btnGeo');
+  if(geoOn){
+    navigator.geolocation.clearWatch(watchId);
+    if(pinMarker){map.removeLayer(pinMarker);pinMarker=null;}
+    if(pinCircle){map.removeLayer(pinCircle);pinCircle=null;}
+    geoOn=false; watchId=null;
+    btn.textContent='📍 Mi ubicación';
+    btn.classList.remove('locating');
+    btn.style.background='#7c3aed';
+    document.getElementById('geoBar').classList.remove('on');
+    document.getElementById('btnSort').style.display='none';
+    document.querySelectorAll('.dbadge').forEach(b=>b.remove());
+    return;
+  }
+  if(!navigator.geolocation){alert('Tu navegador no soporta geolocalización.');return;}
+  btn.textContent='⏳ Buscando...';
+  btn.classList.add('locating');
+  watchId=navigator.geolocation.watchPosition(
+    pos=>{
+      const{latitude:lat,longitude:lng,accuracy:acc}=pos.coords;
+      geoOn=true;
+      btn.textContent='🟢 Activo — toca para apagar';
+      btn.classList.remove('locating');
+      btn.style.background='#059669';
+      document.getElementById('geoBar').classList.add('on');
+      const ico=L.divIcon({className:'',html:'<div class="geo-pin"></div>',iconSize:[16,16],iconAnchor:[8,8]});
+      if(pinMarker){pinMarker.setLatLng([lat,lng]);pinCircle.setLatLng([lat,lng]).setRadius(acc);}
+      else{
+        pinMarker=L.marker([lat,lng],{icon:ico,zIndexOffset:2000}).addTo(map)
+          .bindPopup(`<b style="color:#a78bfa">📍 Tu ubicación</b><br><span style="font-size:10px;color:#94a3b8">±${Math.round(acc)}m de precisión</span>`);
+        pinCircle=L.circle([lat,lng],{radius:acc,color:'#7c3aed',fillColor:'#7c3aed',fillOpacity:0.07,weight:1}).addTo(map);
+      }
+      updateDists(lat,lng);
+    },
+    err=>{
+      btn.textContent='📍 Mi ubicación';
+      btn.classList.remove('locating');
+      btn.style.background='#7c3aed';
+      geoOn=false;
+      const m={1:'Permiso denegado.',2:'No se pudo obtener ubicación.',3:'Tiempo agotado.'};
+      alert(m[err.code]||'Error de geolocalización.');
+    },
+    {enableHighAccuracy:true,maximumAge:8000,timeout:15000}
+  );
+}
+// ── CAPA KML DE REFERENCIA ───────────────────────
+// Sin capa KML configurada
+</script>
+</body>
+</html>
